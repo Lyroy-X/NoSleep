@@ -17,7 +17,11 @@
     "setup script compiles without executing administrative changes",
     "setup account validation and cancellation handling",
     "DMG checksum and application code signature verified",
-    "universal binary contains arm64 and x86_64"
+    "universal binary contains arm64 and x86_64",
+    "DMG has only NoSleep and the Applications link as visible items",
+    "Finder keeps fixed icon positions after a fresh read-only mount",
+    "installation arrow pixels and portable background alias verified",
+    "real Finder window visually checked with app left and destination right"
   ],
   "not_tested": [
     "physical lid closure",
