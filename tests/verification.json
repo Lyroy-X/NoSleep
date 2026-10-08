@@ -1,0 +1,19 @@
+{
+  "platform": "macOS 27.0.1, Apple Silicon",
+  "checks": [
+    "independent system/display controls",
+    "delayed kernel acknowledgement",
+    "failed recovery retains idle assertion",
+    "background enforcement while UI blocked",
+    "normal quit restores system sleep",
+    "off selection survives reopening",
+    "display-only indicator is distinct",
+    "window close keeps background protection",
+    "Dock reopen shows window",
+    "external setting reset restored in 0.67 seconds"
+  ],
+  "not_tested": [
+    "physical lid closure"
+  ],
+  "status": "automated checks passed"
+}
