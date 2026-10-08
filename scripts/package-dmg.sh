@@ -10,8 +10,6 @@ fi
 mkdir -p "$stage"
 ditto "$project_dir/build/NoSleep.app" "$stage/NoSleep.app"
 ln -s /Applications "$stage/Applications"
-cp "$project_dir/scripts/install-power-helper.command" "$stage/Настроить защиту сна.command"
 cp "$project_dir/Resources/INSTALL-ru.txt" "$stage/Сначала прочитай.txt"
-chmod 755 "$stage/Настроить защиту сна.command"
 hdiutil create -volname NoSleep -srcfolder "$stage" -format UDZO "$project_dir/build/NoSleep-universal.dmg"
 print "$project_dir/build/NoSleep-universal.dmg"

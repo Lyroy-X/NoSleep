@@ -1,4 +1,5 @@
 {
+  "version": "3.0",
   "platform": "macOS 27.0.1, Apple Silicon",
   "checks": [
     "independent system/display controls",
@@ -10,10 +11,19 @@
     "display-only indicator is distinct",
     "window close keeps background protection",
     "Dock reopen shows window",
-    "external setting reset restored in 0.67 seconds"
+    "external setting reset restored in 0.69 seconds",
+    "first-run preview offers setup without a premature sudo error",
+    "existing limited power rule detected without another password prompt",
+    "setup script compiles without executing administrative changes",
+    "setup account validation and cancellation handling",
+    "DMG checksum and application code signature verified",
+    "universal binary contains arm64 and x86_64"
   ],
   "not_tested": [
-    "physical lid closure"
+    "physical lid closure",
+    "execution on Intel",
+    "first administrative installation on a new account",
+    "Gatekeeper approval of a downloaded copy on another Mac"
   ],
   "status": "automated checks passed"
 }

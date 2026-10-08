@@ -25,6 +25,84 @@ func waitForPowerState(_ desired: Bool, timeout: TimeInterval = 3, read: () thro
     throw PowerError(message: "macOS не успела применить изменение сна. Повторите переключение.")
 }
 
+func allowsPasswordlessPower(_ listing: String) -> Bool {
+    var records: [String] = []
+    for raw in listing.components(separatedBy: .newlines) {
+        let line = raw.trimmingCharacters(in: .whitespaces)
+        if line.hasPrefix("(") { records.append(line) }
+        else if !records.isEmpty { records[records.count - 1] += " " + line }
+    }
+    var commands = Set<String>()
+    for record in records {
+        guard let close = record.firstIndex(of: ")") else { continue }
+        let runAs = String(record[record.index(after: record.startIndex)..<close]).components(separatedBy: ":")[0]
+        let users = runAs.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard users.contains("root") || users.contains("ALL"),
+              let tag = record.range(of: "NOPASSWD:") else { continue }
+        let body = String(record[tag.upperBound...])
+        // Fail closed on complex overrides or explicit deny rules.
+        guard !body.contains("!") && !body.contains("PASSWD:") else { continue }
+        for command in body.components(separatedBy: ",") {
+            commands.insert(command.split(whereSeparator: { $0.isWhitespace }).joined(separator: " "))
+        }
+    }
+    return commands.contains("ALL") || (commands.contains("/usr/bin/pmset -a disablesleep 1") && commands.contains("/usr/bin/pmset -a disablesleep 0"))
+}
+
+func shellQuote(_ string: String) -> String { "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+func appleScriptQuote(_ string: String) -> String {
+    "\"" + string.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n") + "\""
+}
+struct PowerSetupPlan {
+    let account: String
+    let uid: UInt32
+    var destination: String { "/private/etc/sudoers.d/nosleep_\(uid)" }
+    var rule: String { "\(account) ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0\n" }
+    init(account: String, uid: UInt32) throws {
+        guard uid > 0, account.range(of: "^[\\p{L}\\p{M}\\p{N}_.-]+$", options: .regularExpression) == account.startIndex..<account.endIndex else {
+            throw PowerError(message: "Не удалось подготовить настройку для этой учётной записи.")
+        }
+        self.account = account; self.uid = uid
+    }
+    func execute(runner: (String) throws -> Void) throws {
+        // Construct the rule inside the privileged process. Never trust a user-writable
+        // staging file while installing a permanent administrator rule.
+        let command = """
+        set -eu
+        umask 077
+        stage_dir=$(/usr/bin/mktemp -d /private/tmp/NoSleep-root.XXXXXX)
+        trap '/bin/rm -f "$stage_dir/power-rule"; /bin/rmdir "$stage_dir"' EXIT
+        /usr/bin/printf '%s' \(shellQuote(rule)) > "$stage_dir/power-rule"
+        /usr/sbin/visudo -cf "$stage_dir/power-rule"
+        test ! -e \(shellQuote(destination))
+        /usr/bin/install -o root -g wheel -m 0440 "$stage_dir/power-rule" \(shellQuote(destination))
+        /usr/sbin/visudo -cf \(shellQuote(destination))
+        """
+        try runner("do shell script " + appleScriptQuote(command) + " with administrator privileges")
+    }
+}
+func setupTests() throws {
+    let legacy = "(ALL) ALL\n(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1,\n    /usr/bin/pmset -a disablesleep 0"
+    assert(allowsPasswordlessPower(legacy))
+    assert(!allowsPasswordlessPower("(ALL) ALL"), "Cached admin access is not permanent setup")
+    assert(!allowsPasswordlessPower("(guest) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"))
+    assert(!allowsPasswordlessPower("(root) NOPASSWD: /usr/bin/pmset -a disablesleep 10, /usr/bin/pmset -a disablesleep 0"))
+    assert(!allowsPasswordlessPower("(root) NOPASSWD: ALL, ! /usr/bin/pmset -a disablesleep 0"))
+    assert(!allowsPasswordlessPower("(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, PASSWD: /usr/bin/pmset -a disablesleep 0"))
+    let plan = try PowerSetupPlan(account: "friend.test", uid: 502)
+    assert(plan.rule == "friend.test ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0\n")
+    assert(plan.destination == "/private/etc/sudoers.d/nosleep_502")
+    let unicodePlan = try PowerSetupPlan(account: "пётр", uid: 503)
+    assert(unicodePlan.rule.hasPrefix("пётр ALL="))
+    do { _ = try PowerSetupPlan(account: "a'; touch /tmp/b", uid: 502); fatalError("Unsafe account accepted") } catch {}
+    do { _ = try PowerSetupPlan(account: "friend\n", uid: 502); fatalError("Multiline account accepted") } catch {}
+    var captured = ""
+    try plan.execute { script in captured = script }
+    assert(captured.contains("administrator privileges") && captured.contains("nosleep_502") && captured.contains("visudo -cf"))
+    do { try plan.execute { _ in throw PowerError(message: "cancelled") }; fatalError("Cancellation hidden") } catch {}
+    print("PASS: first-run permissions, cached-access rejection, per-user limited rule, input validation, cancellation")
+}
+
 final class MacPower: PowerControl {
     private var assertion: IOPMAssertionID = 0
     private var displayAssertion: IOPMAssertionID = 0
@@ -48,6 +126,10 @@ final class MacPower: PowerControl {
             throw PowerError(message: result.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return result
+    }
+    func canControlSleep() -> Bool {
+        guard let listing = try? run("/usr/bin/sudo", ["-n", "-l"]) else { return false }
+        return allowsPasswordlessPower(listing)
     }
     func setBlocked(_ value: Bool) throws {
         _ = try run("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
@@ -260,7 +342,7 @@ final class GuardEngine {
                 case "sleep-off": try self.protection.disable()
                 case "display-on": try self.protection.setDisplay(true)
                 case "display-off": try self.protection.setDisplay(false)
-                case "all-off": try self.protection.disable(); try self.protection.setDisplay(false)
+                case "all-off": try self.protection.shutdown()
                 default: throw PowerError(message: "Неизвестная команда")
                 }
                 self.actionError = nil
@@ -334,6 +416,11 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var sleepState: NSTextField!
     var displayState: NSTextField!
     var errorLabel: NSTextField!
+    var setupLabel: NSTextField!
+    var heading: NSTextField!
+    var setupButton: NSButton!
+    var permissionReady: Bool?
+    var setupError: String?
     var busy = false
     var observer: NSObjectProtocol?
     let dataDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NoSleep")
@@ -343,7 +430,9 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                   "statusTitle": current.statusTitle,
                                   "sleepChecked": sleepSwitch.state == .on,
                                   "displayChecked": displaySwitch.state == .on,
-                                  "errorText": errorLabel.stringValue]
+                                  "errorText": errorLabel.stringValue,
+                                  "setupVisible": !setupButton.isHidden, "sleepEnabled": sleepSwitch.isEnabled,
+                                  "setupText": setupLabel.stringValue, "setupButtonTitle": setupButton.title]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) {
             try? data.write(to: dataDir.appendingPathComponent("ui.json"), options: .atomic)
         }
@@ -355,11 +444,16 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 340), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 420), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "NoSleep"; window.center(); window.delegate = self
         window.isReleasedWhenClosed = false
-        let title = label("NoSleep", x: 26, y: 287, width: 400, height: 32)
+        let title = label("NoSleep", x: 26, y: 367, width: 400, height: 32)
         title.font = .boldSystemFont(ofSize: 24)
+        heading = title
+        setupLabel = label("Проверяю готовность NoSleep…", x: 26, y: 280, width: 270, height: 78)
+        setupButton = NSButton(title: "Настроить NoSleep", target: self, action: #selector(setupPower))
+        setupButton.frame = NSRect(x: 300, y: 303, width: 138, height: 34)
+        window.contentView!.addSubview(setupButton)
         sleepSwitch = NSButton(checkboxWithTitle: "Не позволять Mac засыпать", target: self, action: #selector(toggleSleep))
         sleepSwitch.frame = NSRect(x: 26, y: 242, width: 410, height: 26); window.contentView!.addSubview(sleepSwitch)
         sleepState = label("Проверяю…", x: 47, y: 218, width: 385)
@@ -384,18 +478,35 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         engine.changed = { [weak self] state in
             guard let self = self else { return }
             self.writeState(state)
-            DispatchQueue.main.async { self.current = state; self.render() }
+            let lostPermission = state.error != nil && (self.engine.protection.power as? MacPower)?.canControlSleep() == false
+            DispatchQueue.main.async {
+                if lostPermission { self.permissionReady = false }
+                self.current = state; self.render()
+            }
         }
         observer = DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("local.robert.NoSleep.command"), object: nil, queue: .main) { [weak self] notification in
             guard let self = self, let command = notification.userInfo?["command"] as? String else { return }
             if command == "show" { self.showWindow() }
             else if command == "hide" { self.window.close() }
             else if command == "quit" { self.quitApp() }
+            else if command == "snapshot" {
+                if let view = self.window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: image)
+                    if let data = image.representation(using: .png, properties: [:]) { try? data.write(to: self.dataDir.appendingPathComponent("window.png")) }
+                }
+            }
             else if ["sleep-on", "sleep-off", "display-on", "display-off", "all-off"].contains(command) { self.perform(command) }
         }
         let wantedSystem = UserDefaults.standard.object(forKey: "PreventSystemSleep") == nil || UserDefaults.standard.bool(forKey: "PreventSystemSleep")
         let wantedDisplay = UserDefaults.standard.bool(forKey: "KeepDisplayAwake")
-        if wantedSystem { engine.act("sleep-on", save: false) }
+        let preview = CommandLine.arguments.contains("--preview-first-run")
+        engine.queue.async {
+            let ready = !preview && (self.engine.protection.power as? MacPower)?.canControlSleep() == true
+            DispatchQueue.main.async {
+                self.permissionReady = ready; self.render()
+                if ready && wantedSystem { self.perform("sleep-on") }
+            }
+        }
         if wantedDisplay { engine.act("display-on", save: false) }
         engine.start(); render(); showWindow()
     }
@@ -411,25 +522,65 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     func render() {
+        let height: CGFloat = permissionReady == true ? 340 : 420
+        if window.contentView!.bounds.height != height {
+            window.setContentSize(NSSize(width: 460, height: height))
+            heading.frame.origin.y = height - 53
+        }
         sleepSwitch.state = current.systemWanted ? .on : .off
         displaySwitch.state = current.displayWanted ? .on : .off
-        sleepSwitch.isEnabled = !busy; displaySwitch.isEnabled = !busy
+        sleepSwitch.isEnabled = !busy && permissionReady == true
+        displaySwitch.isEnabled = !busy
+        setupLabel.isHidden = permissionReady == true; setupButton.isHidden = permissionReady == true
+        setupButton.isEnabled = permissionReady == false && !busy
+        setupLabel.stringValue = permissionReady == nil ? "Проверяю готовность NoSleep…" : "Один раз разрешите NoSleep включать и выключать сон без повторного пароля. Другие права администратора не добавляются."
         sleepState.stringValue = current.systemWanted ? (current.systemActual ? "Работает: macOS подтверждает запрет сна" : "Запрет сна не подтверждён") : (current.systemActual ? "Сон запрещён другой настройкой macOS" : "Выключено: сон разрешён")
         displayState.stringValue = current.displayWanted ? (current.displayActual ? "Работает: защита экрана включена" : "Защита экрана не подтверждена") : "Выключено: обычный режим экрана"
         sleepState.textColor = current.systemWanted && !current.systemActual ? .systemRed : .secondaryLabelColor
         displayState.textColor = current.displayWanted && !current.displayActual ? .systemRed : .secondaryLabelColor
-        errorLabel.stringValue = current.error.map { "Не выполнено: \($0)" } ?? ""
+        errorLabel.stringValue = setupError ?? (permissionReady == false && current.error != nil
+            ? "Нужно подтвердить настройку NoSleep. Нажмите «Настроить NoSleep»."
+            : current.error.map { "Не выполнено: \($0)" } ?? "")
         let icon = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: "NoSleep")
         icon?.isTemplate = true; item.button?.image = icon
         item.button?.title = current.statusTitle
         item.button?.toolTip = "NoSleep · Сон: \(current.systemActual ? "запрещён" : "разрешён") · Экран: \(current.displayActual ? "не гаснет" : "обычный режим")"
         item.menu?.item(withTag: 2)?.state = current.systemWanted ? .on : .off
+        item.menu?.item(withTag: 2)?.isEnabled = !busy && permissionReady == true
+        item.menu?.item(withTag: 3)?.isEnabled = !busy
         item.menu?.item(withTag: 3)?.state = current.displayWanted ? .on : .off
         writeUI()
     }
     func perform(_ command: String) {
         busy = true; render()
         engine.act(command) { [weak self] in DispatchQueue.main.async { self?.busy = false; self?.render() } }
+    }
+    @objc func setupPower() {
+        guard !busy else { return }
+        setupError = nil; busy = true; render()
+        do {
+            let power = engine.protection.power as! MacPower
+            if !power.canControlSleep() {
+                let plan = try PowerSetupPlan(account: NSUserName(), uid: getuid())
+                try plan.execute { source in
+                    var failure: NSDictionary?
+                    guard let script = NSAppleScript(source: source) else { throw PowerError(message: "Не удалось подготовить настройку.") }
+                    script.executeAndReturnError(&failure)
+                    if let failure = failure {
+                        if (failure[NSAppleScript.errorNumber] as? NSNumber)?.intValue == -128 {
+                            throw PowerError(message: "Настройка отменена. Нажмите «Настроить NoSleep», когда будете готовы.")
+                        }
+                        throw PowerError(message: "macOS не разрешила завершить настройку. Нужен пароль администратора. Если Mac рабочий, обратитесь к его администратору.")
+                    }
+                }
+            }
+            guard power.canControlSleep() else { throw PowerError(message: "Настройка не подтвердилась. Обратитесь к администратору этого Mac.") }
+            setupError = nil; permissionReady = true; busy = false; render(); perform("sleep-on")
+        } catch {
+            setupError = error.localizedDescription; busy = false; render()
+            let message = error.localizedDescription
+            engine.queue.async { var state = self.engine.state(); state.error = message; self.writeState(state) }
+        }
     }
     @objc func toggleSleep() { perform(current.systemWanted ? "sleep-off" : "sleep-on") }
     @objc func toggleDisplay() { perform(current.displayWanted ? "display-off" : "display-on") }
@@ -453,8 +604,18 @@ do {
     if CommandLine.arguments.contains("--self-test") {
         try selfTest()
         try backgroundTest()
+        try setupTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
+    } else if CommandLine.arguments.contains("--verify-setup-script") {
+        let plan = try PowerSetupPlan(account: NSUserName(), uid: getuid())
+        try plan.execute { source in
+            var failure: NSDictionary?
+            guard let script = NSAppleScript(source: source), script.compileAndReturnError(&failure) else {
+                throw PowerError(message: "Setup script did not compile")
+            }
+            print("PASS: native first-run AppleScript compiles without executing admin changes")
+        }
     } else if CommandLine.arguments.contains("--verify-display") {
         let power = MacPower()
         let control = Protection(power)
