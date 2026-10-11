@@ -79,13 +79,13 @@ try:
     wait(lambda:archive.exists(),'manual diagnostic archive produced')
     with zipfile.ZipFile(archive) as z:
         assert set(z.namelist())=={'README.txt','summary.json','events.jsonl'}
-        summary=json.loads(z.read('summary.json'));assert summary['format']==2 and summary['appVersion']=='3.1'
+        summary=json.loads(z.read('summary.json'));assert summary['format']==2 and summary['appVersion']==plistlib.loads((app/'Contents/Info.plist').read_bytes())['CFBundleShortVersionString']
         assert summary['observer']['nativeRecovery']=='enabled' and summary['observer']['link']=='connected'
         assert set(summary['power'])<= {'sleepWanted','sleepActual','displayWanted','displayActual','observerEnabled','vpnState','nativeRecovery','online','issue','number'}
         for line in z.read('events.jsonl').splitlines():
             entry=json.loads(line);assert set(entry)=={'at','kind','facts'}
             assert set(entry['facts'])<= {'sleepWanted','sleepActual','displayWanted','displayActual','observerEnabled','vpnState','nativeRecovery','online','issue','number'}
-    assert archive.stat().st_size<=1100000
+    assert archive.stat().st_size<=200_000_000+256*1024
     results.append('archive has only allowlisted schema, no raw output, and bounded size');print('PASS:',results[-1],flush=True)
     cmd('all-off');wait(lambda:flags(False,False) and read('ui.json').get('observerEnabled') is False,'all owned functions release; Cisco remains independent')
     cmd('quit');wait(stopped,'candidate quits with functions off')

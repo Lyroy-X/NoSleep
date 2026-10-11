@@ -16,12 +16,15 @@ func featureTests() throws {
     assert(!disabled.systemWanted && !disabled.systemActual && !disabled.displayWanted && !disabled.displayActual && disabled.error == nil)
     try observerTests()
     try diagnosticsTests()
+    try diagnosticStreamingTests()
+    if ProcessInfo.processInfo.environment["NOSLEEP_TEST_LARGE_LOGS"] == "1" { try diagnosticLargeBudgetTests() }
     print("PASS: all combined-control states")
 }
 func diagnosticsTests() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("NoSleep-tests-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: root) }
-    let store = DiagnosticStore(root: root)
+    let segmentLimit = 8192
+    let store = DiagnosticStore(root: root, segmentLimit: segmentLimit)
     for _ in 0..<10000 { store.record(.powerState, DiagnosticFacts(sleepWanted: true)) }
     store.flush()
     let logRoot = root.appendingPathComponent("diagnostics")
@@ -33,8 +36,8 @@ func diagnosticsTests() throws {
         var record = try JSONEncoder().encode(DiagnosticRecord(at: Date().timeIntervalSince1970, kind: .powerAction, facts: DiagnosticFacts(number: index)))
         record.append(10)
         var seed = Data()
-        while seed.count + record.count <= DiagnosticStore.fileLimit { seed.append(record) }
-        let padding = DiagnosticStore.fileLimit - seed.count
+        while seed.count + record.count <= segmentLimit { seed.append(record) }
+        let padding = segmentLimit - seed.count
         seed.removeLast(); seed.append(Data(repeating: 32, count: padding)); seed.append(10)
         try seed.write(to: logRoot.appendingPathComponent("events-\(index).jsonl"))
     }
@@ -42,9 +45,9 @@ func diagnosticsTests() throws {
     var total = 0
     for file in try FileManager.default.contentsOfDirectory(at: logRoot, includingPropertiesForKeys: nil) {
         let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as! NSNumber).intValue
-        assert(size <= DiagnosticStore.fileLimit); total += size
+        assert(size <= segmentLimit); total += size
     }
-    assert(total <= DiagnosticStore.fileCount * DiagnosticStore.fileLimit)
+    assert(total <= DiagnosticStore.fileCount * segmentLimit)
     for index in 1..<DiagnosticStore.fileCount {
         let rotated = try Data(contentsOf: logRoot.appendingPathComponent("events-\(index).jsonl"))
         let entry = try JSONDecoder().decode(DiagnosticRecord.self, from: Data(rotated.split(separator: 10)[0]))

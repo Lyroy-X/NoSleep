@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum IssueCode: String, Codable, Error {
     case permissionRequired, commandTimeout, commandFailed, storageError, outputLimit, exportBusy
@@ -26,8 +27,10 @@ struct DiagnosticRecord: Codable {
     let facts: DiagnosticFacts
 }
 final class DiagnosticStore {
-    static let fileLimit = 256 * 1024
+    static let fileLimit = 50_000_000
     static let fileCount = 4
+    static let logLimit = fileLimit * fileCount // 200 MB, decimal bytes, on disk.
+    static let archiveLimit = logLimit + 256 * 1024 // ZIP headers and the small summary/README.
     static let retention: TimeInterval = 7 * 24 * 3600
     static let queueLimit = 32
     let root: URL
@@ -48,8 +51,14 @@ final class DiagnosticStore {
     private let exportLock = NSLock()
     private var lastPower = DiagnosticFacts()
     private let now: () -> Double
-    init(root: URL, now: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
-        self.root = root; self.now = now
+    private let segmentLimit: Int
+    private struct Stamp: Equatable { let size: Int; let modified: Date }
+    private struct Validated { let stamp: Stamp; let oldest: Double; let newest: Double }
+    private var validated: [Int: Validated] = [:] // Four entries, independent of the log size.
+    init(root: URL, now: @escaping () -> Double = { Date().timeIntervalSince1970 },
+         segmentLimit: Int = DiagnosticStore.fileLimit) {
+        precondition(segmentLimit >= DiagnosticStreaming.recordLimit && segmentLimit <= Self.fileLimit)
+        self.root = root; self.now = now; self.segmentLimit = segmentLimit
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try? FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         // Obsolete free-form logs are excluded from sharing and removed on upgrade.
@@ -61,10 +70,18 @@ final class DiagnosticStore {
         for name in ["support-export", "support-report.zip"] {
             try? FileManager.default.removeItem(at: root.appendingPathComponent(name))
         }
+        for index in 0..<Self.fileCount {
+            try? FileManager.default.removeItem(at: logDirectory.appendingPathComponent(".prune-\(index).tmp"))
+        }
         queue.async { self.prune() }
     }
     private var logDirectory: URL { root.appendingPathComponent("diagnostics", isDirectory: true) }
     private func file(_ index: Int) -> URL { logDirectory.appendingPathComponent("events-\(index).jsonl") }
+    private func stamp(_ url: URL) -> Stamp? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? NSNumber, let modified = attrs[.modificationDate] as? Date else { return nil }
+        return Stamp(size: size.intValue, modified: modified)
+    }
     func record(_ kind: DiagnosticKind, _ facts: DiagnosticFacts = DiagnosticFacts()) {
         lock.lock(); defer { lock.unlock() }
         if kind == .powerState {
@@ -111,47 +128,61 @@ final class DiagnosticStore {
         } catch { lock.lock(); failed = true; lock.unlock() }
     }
     private func append(_ record: DiagnosticRecord) throws {
-        var data = try JSONEncoder().encode(record); data.append(10)
-        guard data.count <= 2048 else { throw IssueCode.outputLimit }
-        let size = (try? FileManager.default.attributesOfItem(atPath: file(0).path)[.size] as? NSNumber)?.intValue ?? 0
-        if size + data.count > Self.fileLimit {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        var data = try encoder.encode(record); data.append(10)
+        guard data.count <= DiagnosticStreaming.recordLimit else { throw IssueCode.outputLimit }
+        let before = stamp(file(0)), size = before?.size ?? 0
+        var known = validated[0]
+        if known?.stamp != before { known = nil }
+        if size + data.count > segmentLimit {
             try? FileManager.default.removeItem(at: file(Self.fileCount - 1))
+            validated.removeValue(forKey: Self.fileCount - 1)
             for index in stride(from: Self.fileCount - 2, through: 0, by: -1) {
                 if FileManager.default.fileExists(atPath: file(index).path) {
                     try FileManager.default.moveItem(at: file(index), to: file(index + 1))
                 }
+                validated[index + 1] = validated.removeValue(forKey: index)
             }
+            known = nil
         }
         if !FileManager.default.fileExists(atPath: file(0).path) {
             FileManager.default.createFile(atPath: file(0).path, contents: nil, attributes: [.posixPermissions: 0o600])
         }
         let handle = try FileHandle(forWritingTo: file(0)); defer { try? handle.close() }
         try handle.seekToEnd(); try handle.write(contentsOf: data)
+        if (size == 0 || known != nil || size + data.count > segmentLimit), let after = stamp(file(0)) {
+            validated[0] = Validated(stamp: after, oldest: min(known?.oldest ?? record.at, record.at),
+                                     newest: max(known?.newest ?? record.at, record.at))
+        } else { validated.removeValue(forKey: 0) }
     }
     private func prune() {
         lastPrune = now()
         for index in 0..<Self.fileCount {
             let url = file(index)
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-               let modified = attrs[.modificationDate] as? Date,
-               now() - modified.timeIntervalSince1970 > Self.retention {
+            guard let before = stamp(url) else { validated.removeValue(forKey: index); continue }
+            if now() - before.modified.timeIntervalSince1970 > Self.retention {
                 try? FileManager.default.removeItem(at: url)
+                validated.removeValue(forKey: index)
                 continue
             }
-            guard let handle = try? FileHandle(forReadingFrom: url) else { continue }
-            let data = (try? handle.read(upToCount: Self.fileLimit)) ?? Data()
-            try? handle.close()
-            var retained = Data()
-            for line in data.split(separator: 10) {
-                guard let record = try? JSONDecoder().decode(DiagnosticRecord.self, from: Data(line)),
-                      record.at >= now() - Self.retention, record.at <= now() + 60 else { continue }
-                if let clean = try? JSONEncoder().encode(record) { retained.append(clean); retained.append(10) }
-            }
-            let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
-            if retained.isEmpty { try? FileManager.default.removeItem(at: url) }
-            else if retained != data || size > Self.fileLimit {
-                try? retained.write(to: url, options: .atomic)
-                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            if let known = validated[index], known.stamp == before, before.size <= segmentLimit,
+               known.oldest >= now() - Self.retention, known.newest <= now() + 60 { continue }
+            // Unchanged validated files are skipped. Scan edited/expired files in bounded chunks.
+            let temporary = logDirectory.appendingPathComponent(".prune-\(index).tmp")
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            do {
+                let output = try DiagnosticStreaming.Writer(url: temporary, limit: segmentLimit)
+                let scan = try DiagnosticStreaming.records(from: url, byteLimit: segmentLimit, at: now()) { clean, _ in
+                    try output.append(clean)
+                }
+                try output.close()
+                if output.count == 0 { try FileManager.default.removeItem(at: url); validated.removeValue(forKey: index) }
+                else {
+                    if scan.changed || before.size > segmentLimit { try DiagnosticStreaming.replace(url, with: temporary) }
+                    if let after = stamp(url) { validated[index] = Validated(stamp: after, oldest: scan.oldest, newest: scan.newest) }
+                }
+            } catch {
+                lock.lock(); failed = true; lock.unlock()
             }
         }
     }
@@ -165,21 +196,16 @@ final class DiagnosticStore {
         try? FileManager.default.removeItem(at: stage)
         try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: stage) }
-        var log = Data()
+        let log = try DiagnosticStreaming.Writer(url: stage.appendingPathComponent("events.jsonl"), limit: Self.logLimit)
         try queue.sync {
             for index in stride(from: Self.fileCount - 1, through: 0, by: -1) {
                 guard FileManager.default.fileExists(atPath: file(index).path) else { continue }
-                let handle = try FileHandle(forReadingFrom: file(index)); defer { try? handle.close() }
-                let data = try handle.read(upToCount: Self.fileLimit) ?? Data()
-                for line in data.split(separator: 10) {
-                    if let record = try? JSONDecoder().decode(DiagnosticRecord.self, from: Data(line)),
-                       now() - record.at <= Self.retention, record.at <= now() + 60 {
-                        let clean = try JSONEncoder().encode(record)
-                        if log.count + clean.count + 1 <= Self.fileLimit * Self.fileCount { log.append(clean); log.append(10) }
-                    }
+                _ = try DiagnosticStreaming.records(from: file(index), byteLimit: segmentLimit, at: now()) { clean, _ in
+                    try log.append(clean)
                 }
             }
         }
+        try log.close()
         let os = ProcessInfo.processInfo.operatingSystemVersion
         #if arch(arm64)
         let architecture = "arm64"
@@ -203,13 +229,12 @@ final class DiagnosticStore {
                               at: now(), powerPermissionReady: permissionReady, power: power, observer: observer, storageFailed: storageFailed)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
         try encoder.encode(summary).write(to: stage.appendingPathComponent("summary.json"))
-        try log.write(to: stage.appendingPathComponent("events.jsonl"))
         let help = """
         NoSleep: информация для диагностики
         Напишите: что нажали, что ожидали, что получилось и примерное время ошибки.
         Архив: версии, состояния функций, коды ошибок и события NoSleep.
         Нет паролей, логина, адреса VPN, IP, снимков экрана, профилей Cisco или системных журналов.
-        Вы отправляете файл вручную. Логи: до 1 МБ, до 7 дней; повторные опросы не записываются.
+        Вы отправляете файл вручную. Логи: до 200 МБ (200 000 000 байт), до 7 дней; повторные опросы не записываются.
         """
         try Data(help.utf8).write(to: stage.appendingPathComponent("README.txt"))
         let temporary = root.appendingPathComponent("support-report.zip")
@@ -219,10 +244,21 @@ final class DiagnosticStore {
         p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
         let done = DispatchSemaphore(value: 0); p.terminationHandler = { _ in done.signal() }
         try p.run()
-        guard done.wait(timeout: .now() + 15) == .success else { p.terminate(); throw IssueCode.commandTimeout }
+        guard done.wait(timeout: .now() + 120) == .success else {
+            p.terminate()
+            if done.wait(timeout: .now() + 1) != .success {
+                kill(p.processIdentifier, SIGKILL)
+                _ = done.wait(timeout: .now() + 1)
+            }
+            throw IssueCode.commandTimeout
+        }
         let size = (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.intValue ?? Int.max
-        guard p.terminationStatus == 0, size <= 1_100_000 else { throw IssueCode.storageError }
-        try Data(contentsOf: temporary, options: .mappedIfSafe).write(to: destination, options: .atomic)
+        guard p.terminationStatus == 0, size <= Self.archiveLimit else { throw IssueCode.storageError }
+        let copy = destination.deletingLastPathComponent().appendingPathComponent(".NoSleep-\(UUID().uuidString).zip")
+        defer { try? FileManager.default.removeItem(at: copy) }
+        try FileManager.default.copyItem(at: temporary, to: copy)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy.path)
+        try DiagnosticStreaming.replace(destination, with: copy)
         record(.exported)
     }
 }
