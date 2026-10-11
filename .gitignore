@@ -3,3 +3,5 @@ build/
 *.log
 state.json
 ui.json
+.taskflow/
+__pycache__/
