@@ -1,6 +1,6 @@
 import AppKit
 
-func uiTests() throws {
+func uiTests(runTerminationRegression: Bool = true) throws {
     let menu = applicationMenu()
     let titles = menu.items.flatMap { [$0.title] + ($0.submenu?.items.map { $0.title } ?? []) }
     assert(!titles.contains { $0.contains("VPN") || $0.contains("Cisco") })
@@ -12,6 +12,7 @@ func uiTests() throws {
     assert(menu.items.contains { $0.title == "Правка" })
     assert(menu.items.contains { $0.title == "Окно" })
     assert(menu.items.contains { $0.title == "Помощь" })
+    if runTerminationRegression {
     let check = Process(), output = Pipe()
     let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     check.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -23,5 +24,6 @@ func uiTests() throws {
         throw PowerError(message: "System termination regression: " + String(decoding: data, as: UTF8.self))
     }
     print("PASS: system quit cancellation and critical confirmation mutation")
+    }
     print("PASS: power and diagnostics menus remain; VPN menus absent")
 }

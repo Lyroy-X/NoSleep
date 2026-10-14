@@ -26,6 +26,7 @@ subprocess.run(['codesign','--force','--sign','-',str(app)],check=True,capture_o
 run=subprocess.run([str(exe),str(case),bundle],capture_output=True,text=True,timeout=30)
 (case/'runtime.log').write_text(run.stdout+run.stderr)
 assert run.returncode==0,run.stdout+run.stderr
+assert "PASS: system quit cancellation and critical confirmation mutation" not in run.stdout, "UI fixture repeated the compiler-based regression instead of its own dialog tests"
 receipt={'result':'passed','level':'e2e','scope':'current native UI with isolated power model','realPowerActions':0,'installedAppActions':0,'networkActions':0,'inputs':{str(p.relative_to(root)) if p.is_relative_to(root) else str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}}
 (case/'receipt.json').write_text(json.dumps(receipt,indent=2))
 print(run.stdout);print('Evidence:',case)

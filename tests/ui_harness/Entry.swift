@@ -27,7 +27,7 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         owner.engine.changed = { owner.current = $0 }
         try FileManager.default.createDirectory(at: UIHarnessEnvironment.dataDirectory, withIntermediateDirectories: true)
         owner.render()
-        try uiTests()
+        try uiTests(runTerminationRegression: false)
         let controls = walk(owner.window.contentView!).compactMap { $0 as? NSSwitch }
         require(controls.count == 2, "only independent sleep and display switches remain")
         let labels = walk(owner.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
