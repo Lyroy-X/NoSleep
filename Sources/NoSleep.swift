@@ -407,19 +407,19 @@ func backgroundTest() throws {
     print("PASS: background recovery continues while UI thread is blocked; async shutdown")
 }
 
-final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate {
     let engine = GuardEngine(MacPower())
     var current = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
     var item: NSStatusItem!
     var window: NSWindow!
-    var sleepSwitch: NSButton!
-    var displaySwitch: NSButton!
+    var sleepSwitch: NSSwitch!
+    var displaySwitch: NSSwitch!
     var sleepState: NSTextField!
     var displayState: NSTextField!
     var errorLabel: NSTextField!
     var setupLabel: NSTextField!
-    var heading: NSTextField!
     var setupButton: NSButton!
+    var setupRow: NSStackView!
     var permissionReady: Bool?
     var setupError: String?
     var busy = false
@@ -428,90 +428,142 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     lazy var diagnostics = DiagnosticStore(root: dataDir)
     var lastUIData = Data()
     var allButton: NSButton!
-    var observationSwitch: NSButton!
-    var observationLabel: NSTextField!
-    var recoveryLabel: NSTextField!
-    var observation = CiscoObservation()
-    lazy var cisco = CiscoObserver(diagnostics: diagnostics)
+    var exportButton: NSButton!
     var exporting = false
+    static let allToolbar = NSToolbarItem.Identifier("NoSleep.All")
+    static let exportToolbar = NSToolbarItem.Identifier("NoSleep.Export")
+
     func writeUI() {
         let state: [String: Any] = ["windowVisible": window.isVisible, "windowTitle": window.title,
                                   "statusTitle": current.statusTitle,
-                                  "sleepChecked": sleepSwitch.state == .on,
-                                  "displayChecked": displaySwitch.state == .on,
+                                  "sleepChecked": sleepSwitch.state == .on, "displayChecked": displaySwitch.state == .on,
                                   "errorText": errorLabel.stringValue,
-                                  "setupVisible": !setupButton.isHidden, "sleepEnabled": sleepSwitch.isEnabled,
+                                  "setupVisible": !setupRow.isHidden, "sleepEnabled": sleepSwitch.isEnabled,
                                   "setupText": setupLabel.stringValue, "setupButtonTitle": setupButton.title,
                                   "allButtonTitle": allButton.title, "diagnosticsFailed": diagnostics.storageFailed,
-                                  "observerEnabled": observation.enabled, "vpnState": observation.link.rawValue,
-                                  "observerIssue": observation.issue?.rawValue ?? "none", "vpnStatus": observation.text,
-                                  "nativeRecovery": observation.nativeRecovery.rawValue,
-                                  "observerSwitchEnabled": observationSwitch.isEnabled]
-        if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) {
-            if data != lastUIData {
-                try? data.write(to: dataDir.appendingPathComponent("ui.json"), options: .atomic)
-                lastUIData = data
-            }
+                                  "exporting": exporting]
+        if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]), data != lastUIData {
+            try? data.write(to: dataDir.appendingPathComponent("ui.json"), options: .atomic); lastUIData = data
         }
     }
-    func label(_ text: String, x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat = 24) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.frame = NSRect(x: x, y: y, width: width, height: height)
-        window.contentView!.addSubview(l); return l
+    func uiLabel(_ text: String, size: CGFloat = 12, weight: NSFont.Weight = .regular, secondary: Bool = false) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: size, weight: weight)
+        label.textColor = secondary ? .secondaryLabelColor : .labelColor
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+    func switchControl(_ title: String, action: Selector) -> NSSwitch {
+        let control = NSSwitch(); control.target = self; control.action = action
+        control.setAccessibilityLabel(title); control.toolTip = title
+        return control
+    }
+    func row(_ title: String, detail: NSTextField? = nil, control: NSView) -> NSStackView {
+        let labels = NSStackView(); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 3
+        labels.addArrangedSubview(uiLabel(title, size: 13, weight: .medium))
+        if let detail = detail { labels.addArrangedSubview(detail) }
+        let result = NSStackView(views: [labels, control]); result.distribution = .fill; result.orientation = .horizontal; result.alignment = .centerY; result.spacing = 18
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return result
+    }
+    func separator() -> NSView {
+        let view = NSBox(); view.boxType = .separator
+        view.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return view
+    }
+    func card(_ rows: [NSView]) -> NSView {
+        let box = NSBox(); box.boxType = .custom; box.titlePosition = .noTitle
+        box.fillColor = .controlBackgroundColor; box.borderColor = .separatorColor
+        box.borderWidth = 0.5; box.cornerRadius = 9
+        let stack = NSStackView(views: rows); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(stack)
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
+                                     stack.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -16),
+                                     stack.topAnchor.constraint(equalTo: box.topAnchor, constant: 14),
+                                     stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -14)])
+        for view in rows { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        return box
+    }
+    func buildWindow() {
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "NoSleep"; window.minSize = NSSize(width: 520, height: 590)
+        window.delegate = self; window.isReleasedWhenClosed = false
+        window.setFrameAutosaveName("NoSleep.MainWindow"); if !window.setFrameUsingName("NoSleep.MainWindow") { window.center() }
+        allButton = NSButton(title: "Выключить всё", target: self, action: #selector(toggleAll)); allButton.bezelStyle = .rounded
+        allButton.setAccessibilityLabel("Включить или выключить все функции NoSleep")
+        allButton.heightAnchor.constraint(equalToConstant: 28).isActive = true; allButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 135).isActive = true
+        exportButton = NSButton(title: "Отчёт…", target: self, action: #selector(exportDiagnostics)); exportButton.bezelStyle = .rounded
+        exportButton.toolTip = "Сохранить диагностику без паролей"
+        exportButton.heightAnchor.constraint(equalToConstant: 28).isActive = true; exportButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 82).isActive = true
+        let toolbar = NSToolbar(identifier: "NoSleep.Toolbar"); toolbar.delegate = self
+        toolbar.displayMode = .iconOnly; toolbar.allowsUserCustomization = false
+        window.toolbar = toolbar; window.toolbarStyle = .unifiedCompact
+        let scroll = NSScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        let document = FlippedContentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
+        window.contentView!.addSubview(scroll)
+        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
+                                     scroll.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
+                                     scroll.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
+                                     scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
+                                     document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)])
+        let body = NSStackView(); body.orientation = .vertical; body.alignment = .leading; body.spacing = 12
+        body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
+        NSLayoutConstraint.activate([body.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
+                                     body.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
+                                     body.topAnchor.constraint(equalTo: document.topAnchor, constant: 20),
+                                     body.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20)])
+        setupLabel = uiLabel("Проверяю готовность NoSleep…", secondary: true)
+        setupButton = NSButton(title: "Настроить NoSleep", target: self, action: #selector(setupPower)); setupButton.bezelStyle = .rounded
+        setupRow = NSStackView(views: [setupLabel, setupButton]); setupRow.orientation = .horizontal; setupRow.alignment = .centerY; setupRow.spacing = 12
+        setupButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        body.addArrangedSubview(setupRow)
+        body.addArrangedSubview(uiLabel("Защита Mac", size: 13, weight: .semibold))
+        sleepSwitch = switchControl("Mac не засыпает", action: #selector(toggleSleep))
+        displaySwitch = switchControl("Экран не гаснет", action: #selector(toggleDisplay))
+        sleepState = uiLabel("Проверяю…", secondary: true); displayState = uiLabel("Проверяю…", secondary: true)
+        let power = card([row("Mac не засыпает", detail: sleepState, control: sleepSwitch), separator(),
+                          row("Экран не гаснет", detail: displayState, control: displaySwitch)])
+        body.addArrangedSubview(power); body.setCustomSpacing(20, after: power)
+        let logBudget = uiLabel("До 200 МБ · хранение 7 дней · без паролей", secondary: true)
+        body.addArrangedSubview(uiLabel("Диагностика", size: 13, weight: .semibold)); body.addArrangedSubview(logBudget)
+        errorLabel = uiLabel(""); errorLabel.textColor = .systemRed; errorLabel.isHidden = true; body.addArrangedSubview(errorLabel)
+        let foot = uiLabel("Закрытие окна оставляет NoSleep работать в фоне.", size: 11, secondary: true); body.addArrangedSubview(foot)
+        for view in body.arrangedSubviews { view.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true }
+    }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, Self.allToolbar, Self.exportToolbar] }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        if identifier == Self.allToolbar {
+            item.view = allButton; item.label = "Все функции"
+        } else if identifier == Self.exportToolbar {
+            item.view = exportButton; item.label = "Диагностика"
+        } else { return nil }
+        return item
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.mainMenu = applicationMenu()
-        try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
-        diagnostics.record(.launch)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        window.title = "NoSleep"; window.center(); window.delegate = self
-        window.isReleasedWhenClosed = false
-        let title = label("NoSleep", x: 26, y: 587, width: 464, height: 32)
-        title.font = .boldSystemFont(ofSize: 24)
-        heading = title
-        setupLabel = label("Проверяю готовность NoSleep…", x: 26, y: 495, width: 300, height: 78)
-        setupButton = NSButton(title: "Настроить NoSleep", target: self, action: #selector(setupPower))
-        setupButton.frame = NSRect(x: 345, y: 523, width: 145, height: 34)
-        window.contentView!.addSubview(setupButton)
-        sleepSwitch = NSButton(checkboxWithTitle: "Не позволять Mac засыпать", target: self, action: #selector(toggleSleep))
-        sleepSwitch.frame = NSRect(x: 26, y: 462, width: 464, height: 26); window.contentView!.addSubview(sleepSwitch)
-        sleepState = label("Проверяю…", x: 47, y: 438, width: 445)
-        displaySwitch = NSButton(checkboxWithTitle: "Не гасить экран при бездействии", target: self, action: #selector(toggleDisplay))
-        displaySwitch.frame = NSRect(x: 26, y: 398, width: 464, height: 26); window.contentView!.addSubview(displaySwitch)
-        displayState = label("Проверяю…", x: 47, y: 374, width: 445)
-        observationSwitch = NSButton(checkboxWithTitle: "Показывать состояние рабочего VPN", target: self, action: #selector(toggleObservation))
-        observationSwitch.frame = NSRect(x: 26, y: 326, width: 464, height: 26); window.contentView!.addSubview(observationSwitch)
-        observationLabel = label("", x: 47, y: 275, width: 445, height: 44); observationLabel.font = .systemFont(ofSize: 12)
-        recoveryLabel = label("", x: 26, y: 211, width: 464, height: 48); recoveryLabel.font = .systemFont(ofSize: 12)
-        let openCisco = NSButton(title: "Открыть Cisco", target: self, action: #selector(openCiscoApp)); openCisco.frame = NSRect(x: 26, y: 167, width: 160, height: 30); window.contentView!.addSubview(openCisco)
-        let hint = label("Соединение и пароль обслуживает Cisco. NoSleep только читает статус.\nПри новом входе может понадобиться авторизация в Cisco.", x: 26, y: 130, width: 464, height: 32); hint.font = .systemFont(ofSize: 11); hint.textColor = .secondaryLabelColor
-        errorLabel = label("", x: 26, y: 74, width: 464, height: 51); errorLabel.textColor = .systemRed
-        allButton = NSButton(title: "Выключить всё", target: self, action: #selector(toggleAll)); allButton.frame = NSRect(x: 26, y: 38, width: 150, height: 30); window.contentView!.addSubview(allButton)
-        let export = NSButton(title: "Диагностика…", target: self, action: #selector(exportDiagnostics)); export.frame = NSRect(x: 181, y: 38, width: 140, height: 30); window.contentView!.addSubview(export)
-        let quit = NSButton(title: "Выйти", target: self, action: #selector(quitApp)); quit.frame = NSRect(x: 390, y: 38, width: 108, height: 30); window.contentView!.addSubview(quit)
-        let foot = label("Закрытие окна оставляет приложение работать в фоне.", x: 26, y: 8, width: 464, height: 20); foot.font = .systemFont(ofSize: 11); foot.textColor = .secondaryLabelColor
+        NSApplication.shared.mainMenu = applicationMenu(target: self)
+        NSApplication.shared.windowsMenu = NSApplication.shared.mainMenu?.items.first(where: { $0.title == "Окно" })?.submenu
+        NSApplication.shared.helpMenu = NSApplication.shared.mainMenu?.items.first(where: { $0.title == "Помощь" })?.submenu
+        try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true); diagnostics.record(.launch)
+        buildWindow()
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Открыть NoSleep", action: #selector(showWindow), keyEquivalent: ""))
-        menu.addItem(.separator())
-        let sleepMenu = NSMenuItem(title: "Не позволять Mac засыпать", action: #selector(toggleSleep), keyEquivalent: ""); sleepMenu.tag = 2; menu.addItem(sleepMenu)
-        let displayMenu = NSMenuItem(title: "Не гасить экран", action: #selector(toggleDisplay), keyEquivalent: ""); displayMenu.tag = 3; menu.addItem(displayMenu)
-        let observationMenu = NSMenuItem(title: "Наблюдать за VPN", action: #selector(toggleObservation), keyEquivalent: ""); observationMenu.tag = 4; menu.addItem(observationMenu)
-        menu.addItem(NSMenuItem(title: "Открыть Cisco", action: #selector(openCiscoApp), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Открыть NoSleep", action: #selector(showWindow), keyEquivalent: "")); menu.addItem(.separator())
+        let sleepMenu = NSMenuItem(title: "Mac не засыпает", action: #selector(toggleSleep), keyEquivalent: ""); sleepMenu.tag = 2; menu.addItem(sleepMenu)
+        let displayMenu = NSMenuItem(title: "Экран не гаснет", action: #selector(toggleDisplay), keyEquivalent: ""); displayMenu.tag = 3; menu.addItem(displayMenu)
         let allMenu = NSMenuItem(title: "Выключить всё", action: #selector(toggleAll), keyEquivalent: ""); allMenu.tag = 5; menu.addItem(allMenu)
-        menu.addItem(NSMenuItem(title: "Сохранить диагностику…", action: #selector(exportDiagnostics), keyEquivalent: ""))
-        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Сохранить диагностику…", action: #selector(exportDiagnostics), keyEquivalent: "")); menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Выйти", action: #selector(quitApp), keyEquivalent: "q"))
-        for entry in menu.items { entry.target = self }
-        item.menu = menu
+        for entry in menu.items { entry.target = self }; item.menu = menu
         engine.changed = { [weak self] state in
-            guard let self = self else { return }
-            self.writeState(state)
+            guard let self = self else { return }; self.writeState(state)
             let lostPermission = state.error != nil && (self.engine.protection.power as? MacPower)?.canControlSleep() == false
-            DispatchQueue.main.async {
-                if lostPermission { self.permissionReady = false }
-                self.current = state; self.render()
-            }
+            DispatchQueue.main.async { if lostPermission { self.permissionReady = false }; self.current = state; self.render() }
         }
         observer = DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("local.robert.NoSleep.command"), object: nil, queue: .main) { [weak self] notification in
             guard let self = self, let command = notification.userInfo?["command"] as? String else { return }
@@ -523,10 +575,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     view.cacheDisplay(in: view.bounds, to: image)
                     if let data = image.representation(using: .png, properties: [:]) { try? data.write(to: self.dataDir.appendingPathComponent("window.png")) }
                 }
-            }
-            else if command == "export-test" { self.saveDiagnostics(to: self.dataDir.appendingPathComponent("last-support-test.zip")) }
-            else if command == "observer-on" { self.cisco.setEnabled(true) }
-            else if command == "observer-off" { self.cisco.setEnabled(false) }
+            } else if command == "export-test" { self.saveDiagnostics(to: self.dataDir.appendingPathComponent("last-support-test.zip")) }
             else if command == "toggle-all" { self.toggleAll() }
             else if ["sleep-on", "sleep-off", "display-on", "display-off", "all-off", "all-on"].contains(command) { self.perform(command) }
         }
@@ -535,74 +584,55 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let preview = CommandLine.arguments.contains("--preview-first-run")
         engine.queue.async {
             let ready = !preview && (self.engine.protection.power as? MacPower)?.canControlSleep() == true
-            DispatchQueue.main.async {
-                self.permissionReady = ready; self.render()
-                if ready && wantedSystem { self.perform("sleep-on") }
-            }
+            DispatchQueue.main.async { self.permissionReady = ready; self.render(); if ready && wantedSystem { self.perform("sleep-on") } }
         }
         if wantedDisplay { engine.act("display-on", save: false) }
-        cisco.changed = { [weak self] state in DispatchQueue.main.async { self?.observation = state; self?.render() } }
-        cisco.start()
         engine.start(); render(); showWindow()
     }
     func writeState(_ state: LiveState) {
         diagnostics.snapshot(state)
         diagnostics.record(.powerState, DiagnosticFacts(sleepWanted: state.systemWanted, sleepActual: state.systemActual,
-                             displayWanted: state.displayWanted, displayActual: state.displayActual,
-                             issue: state.error == nil ? nil : .commandFailed))
+                             displayWanted: state.displayWanted, displayActual: state.displayActual, issue: state.error == nil ? nil : .commandFailed))
     }
     func render() {
-        let height: CGFloat = permissionReady == true ? 560 : 640
-        if window.contentView!.bounds.height != height {
-            window.setContentSize(NSSize(width: 520, height: height))
-            heading.frame.origin.y = height - 53
-        }
-        allButton.title = aggregateTitle(system: current.systemWanted, display: current.displayWanted, observing: observation.enabled)
-        allButton.isEnabled = !busy && (current.systemWanted || current.displayWanted || observation.enabled || permissionReady == true)
-        item.menu?.item(withTag: 5)?.title = allButton.title
-        item.menu?.item(withTag: 5)?.isEnabled = allButton.isEnabled
-        observationSwitch.state = observation.enabled ? .on : .off
-        observationSwitch.isEnabled = observation.available && !busy
-        observationLabel.stringValue = observation.text
-        observationLabel.textColor = observation.issue != nil ? .systemRed : .secondaryLabelColor
-        recoveryLabel.stringValue = observation.recoveryText
-        item.menu?.item(withTag: 4)?.state = observationSwitch.state
-        item.menu?.item(withTag: 4)?.isEnabled = observationSwitch.isEnabled
-        sleepSwitch.state = current.systemWanted ? .on : .off
-        displaySwitch.state = current.displayWanted ? .on : .off
-        sleepSwitch.isEnabled = !busy && permissionReady == true
-        displaySwitch.isEnabled = !busy
-        setupLabel.isHidden = permissionReady == true; setupButton.isHidden = permissionReady == true
+        guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.render() }; return }
+        guard window != nil, item != nil else { return }
+        allButton.title = aggregateTitle(system: current.systemWanted, display: current.displayWanted)
+        allButton.isEnabled = !busy
+        item.menu?.item(withTag: 5)?.title = allButton.title; item.menu?.item(withTag: 5)?.isEnabled = allButton.isEnabled
+        sleepSwitch.state = current.systemWanted ? .on : .off; displaySwitch.state = current.displayWanted ? .on : .off
+        sleepSwitch.isEnabled = !busy && permissionReady == true; displaySwitch.isEnabled = !busy
+        setupRow.isHidden = permissionReady == true; setupLabel.isHidden = setupRow.isHidden; setupButton.isHidden = setupRow.isHidden
         setupButton.isEnabled = permissionReady == false && !busy
-        setupLabel.stringValue = permissionReady == nil ? "Проверяю готовность NoSleep…" : "Один раз разрешите NoSleep включать и выключать сон без повторного пароля. Другие права администратора не добавляются."
-        sleepState.stringValue = current.systemWanted ? (current.systemActual ? "Работает: macOS подтверждает запрет сна" : "Запрет сна не подтверждён") : (current.systemActual ? "Сон запрещён другой настройкой macOS" : "Выключено: сон разрешён")
-        displayState.stringValue = current.displayWanted ? (current.displayActual ? "Работает: защита экрана включена" : "Защита экрана не подтверждена") : "Выключено: обычный режим экрана"
+        setupLabel.stringValue = permissionReady == nil ? "Проверяю готовность NoSleep…" : "Один раз разрешите NoSleep управлять защитой сна. Подтверждение macOS запрашивается только при настройке."
+        sleepState.stringValue = current.systemWanted ? (current.systemActual ? "Защита сна работает" : "Не удалось подтвердить защиту сна") : (current.systemActual ? "Сон запрещён другой настройкой macOS" : "Выключено: сон разрешён")
+        displayState.stringValue = current.displayWanted ? (current.displayActual ? "Экран остаётся включённым" : "Не удалось подтвердить защиту экрана") : "Выключено: обычный режим экрана"
         sleepState.textColor = current.systemWanted && !current.systemActual ? .systemRed : .secondaryLabelColor
         displayState.textColor = current.displayWanted && !current.displayActual ? .systemRed : .secondaryLabelColor
-        errorLabel.stringValue = setupError ?? (permissionReady == false && current.error != nil
-            ? "Нужно подтвердить настройку NoSleep. Нажмите «Настроить NoSleep»."
-            : current.error.map { "Не выполнено: \($0)" } ?? "")
-        let icon = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: "NoSleep")
-        icon?.isTemplate = true; item.button?.image = icon
-        item.button?.title = current.statusTitle
+        errorLabel.stringValue = setupError ?? (permissionReady == false && current.error != nil ? "Для защиты сна нажмите «Настроить NoSleep»." : current.error.map { "Не выполнено: \($0)" } ?? "")
+        errorLabel.isHidden = errorLabel.stringValue.isEmpty
+        exportButton.isEnabled = !exporting
+        if let menu = NSApplication.shared.mainMenu?.items.first(where: { $0.title == "Управление" })?.submenu {
+            for (tag, control) in [(22, sleepSwitch!), (23, displaySwitch!)] {
+                menu.item(withTag: tag)?.state = control.state; menu.item(withTag: tag)?.isEnabled = control.isEnabled
+            }
+            menu.item(withTag: 25)?.title = allButton.title; menu.item(withTag: 25)?.isEnabled = allButton.isEnabled
+            menu.item(withTag: 27)?.isEnabled = !exporting
+        }
+        let icon = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: "NoSleep"); icon?.isTemplate = true
+        item.button?.image = icon; item.button?.title = current.statusTitle
         item.button?.toolTip = "NoSleep · Сон: \(current.systemActual ? "запрещён" : "разрешён") · Экран: \(current.displayActual ? "не гаснет" : "обычный режим")"
-        item.menu?.item(withTag: 2)?.state = current.systemWanted ? .on : .off
-        item.menu?.item(withTag: 2)?.isEnabled = !busy && permissionReady == true
-        item.menu?.item(withTag: 3)?.isEnabled = !busy
-        item.menu?.item(withTag: 3)?.state = current.displayWanted ? .on : .off
+        item.menu?.item(withTag: 2)?.state = sleepSwitch.state; item.menu?.item(withTag: 2)?.isEnabled = sleepSwitch.isEnabled
+        item.menu?.item(withTag: 3)?.state = displaySwitch.state; item.menu?.item(withTag: 3)?.isEnabled = displaySwitch.isEnabled
         writeUI()
     }
     func perform(_ command: String) {
         guard !busy else { return }
-        if command == "all-off" { cisco.setEnabled(false) }
-        if command == "all-on" && observation.available { cisco.setEnabled(true) }
         diagnostics.record(.powerAction, DiagnosticFacts(number: ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off"].firstIndex(of: command)))
-        busy = true; render()
-        engine.act(command) { [weak self] in DispatchQueue.main.async { self?.busy = false; self?.render() } }
+        busy = true; render(); engine.act(command) { [weak self] in DispatchQueue.main.async { self?.busy = false; self?.render() } }
     }
     @objc func setupPower() {
-        guard !busy else { return }
-        setupError = nil; busy = true; render()
+        guard !busy else { return }; setupError = nil; busy = true; render()
         do {
             let power = engine.protection.power as! MacPower
             if !power.canControlSleep() {
@@ -612,9 +642,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard let script = NSAppleScript(source: source) else { throw PowerError(message: "Не удалось подготовить настройку.") }
                     script.executeAndReturnError(&failure)
                     if let failure = failure {
-                        if (failure[NSAppleScript.errorNumber] as? NSNumber)?.intValue == -128 {
-                            throw PowerError(message: "Настройка отменена. Нажмите «Настроить NoSleep», когда будете готовы.")
-                        }
+                        if (failure[NSAppleScript.errorNumber] as? NSNumber)?.intValue == -128 { throw PowerError(message: "Настройка отменена. Повторите её, когда будете готовы.") }
                         throw PowerError(message: "macOS не разрешила завершить настройку. Нужен пароль администратора. Если Mac рабочий, обратитесь к его администратору.")
                     }
                 }
@@ -623,45 +651,33 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setupError = nil; permissionReady = true; busy = false; render(); perform("sleep-on")
         } catch {
             setupError = error.localizedDescription; busy = false; render()
-            let message = error.localizedDescription
-            engine.queue.async { var state = self.engine.state(); state.error = message; self.writeState(state) }
+            let message = error.localizedDescription; engine.queue.async { var state = self.engine.state(); state.error = message; self.writeState(state) }
         }
     }
     @objc func toggleSleep() { perform(current.systemWanted ? "sleep-off" : "sleep-on") }
     @objc func toggleDisplay() { perform(current.displayWanted ? "display-off" : "display-on") }
-    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted || observation.enabled ? "all-off" : "all-on") }
-    @objc func toggleObservation() { cisco.setEnabled(!observation.enabled) }
-    @objc func openCiscoApp() {
-        guard let url = verifiedCiscoApplication() else {
-            let alert = NSAlert(); alert.messageText = "Не найден подтверждённый Cisco Secure Client"
-            alert.informativeText = "Откройте установленный рабочий клиент обычным способом. NoSleep не изменял его настройки."
-            alert.runModal(); return
-        }
-        // Explicit user action opens the normal client UI; no login, AppleEvents or password injection.
-        NSWorkspace.shared.open(url)
+    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted ? "all-off" : "all-on") }
+    @objc func showHelp() {
+        let alert = NSAlert(); alert.messageText = "Как работает NoSleep"
+        alert.informativeText = "Защита сна и экрана включаются независимо. Отчёт сохраняется вручную и не содержит секретов. Закрытие окна оставляет NoSleep работать в фоне."
+        alert.beginSheetModal(for: window)
     }
     @objc func exportDiagnostics() {
-        guard !exporting else { return }
-        let panel = NSSavePanel(); panel.nameFieldStringValue = "NoSleep-diagnostics.zip"
+        guard !exporting else { return }; let panel = NSSavePanel(); panel.nameFieldStringValue = "NoSleep-diagnostics.zip"
         panel.title = "Сохранить диагностику без секретов"; panel.canCreateDirectories = true
-        panel.beginSheetModal(for: window) { [weak self] result in
-            if result == .OK, let url = panel.url { self?.saveDiagnostics(to: url) }
-        }
+        panel.beginSheetModal(for: window) { [weak self] result in if result == .OK, let url = panel.url { self?.saveDiagnostics(to: url) } }
     }
     func saveDiagnostics(to url: URL) {
-        guard !exporting else { return }; exporting = true
-        let permission = permissionReady == true; let observerState = observation
+        guard !exporting else { return }; exporting = true; render()
+        let permission = permissionReady == true
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let failed: Bool
-            do { try self.diagnostics.export(to: url, permissionReady: permission, observer: observerState); failed = false }
-            catch { failed = true }
+            guard let self = self else { return }; let failed: Bool
+            do { try self.diagnostics.export(to: url, permissionReady: permission); failed = false } catch { failed = true }
             DispatchQueue.main.async {
-                self.exporting = false
+                self.exporting = false; self.render()
                 if failed {
                     let alert = NSAlert(); alert.messageText = "Не удалось сохранить диагностику"
-                    alert.informativeText = "Выберите доступную папку и повторите. Защита сна продолжает работать."
-                    alert.runModal()
+                    alert.informativeText = "Выберите доступную папку и повторите. Защита сна продолжает работать."; alert.beginSheetModal(for: self.window)
                 } else { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             }
         }
@@ -673,15 +689,12 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         do {
             try engine.shutdownNow()
-            cisco.stop()
-            diagnostics.record(.shutdown); diagnostics.flush()
-            return .terminateNow
-        } catch {
-            errorLabel.stringValue = "Не удалось снять защиту: \(error.localizedDescription)"
-            return .terminateCancel
-        }
+            diagnostics.record(.shutdown); diagnostics.flush(); return .terminateNow
+        } catch { errorLabel.stringValue = "Не удалось снять защиту: \(error.localizedDescription)"; errorLabel.isHidden = false; return .terminateCancel }
     }
 }
+
+final class FlippedContentView: NSView { override var isFlipped: Bool { true } }
 
 @main enum NoSleepMain {
 static func main() {
@@ -691,11 +704,9 @@ do {
         try backgroundTest()
         try setupTests()
         try featureTests()
+        try uiTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
-    } else if CommandLine.arguments.contains("--verify-cisco-observer") {
-        let client = CiscoStateClient(); let state = try client.readState(cancellation: ObservationCancellation())
-        print("PASS: signed Cisco state-only query: \(state.rawValue); native recovery: \(installedNativeRecovery().rawValue); trusted GUI: \(verifiedCiscoApplication() != nil)")
     } else if CommandLine.arguments.contains("--verify-setup-script") {
         let plan = try PowerSetupPlan(account: NSUserName(), uid: getuid())
         try plan.execute { source in

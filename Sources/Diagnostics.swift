@@ -7,17 +7,12 @@ enum IssueCode: String, Codable, Error {
 }
 enum DiagnosticKind: String, Codable {
     case launch, powerAction, powerState, exported, shutdown, migration, queueOverflow
-    case observerState, observerAction
 }
 struct DiagnosticFacts: Codable, Equatable {
     var sleepWanted: Bool?
     var sleepActual: Bool?
     var displayWanted: Bool?
     var displayActual: Bool?
-    var observerEnabled: Bool?
-    var vpnState: VPNLinkState?
-    var nativeRecovery: NativeRecovery?
-    var online: Bool?
     var issue: IssueCode?
     var number: Int?
 }
@@ -87,7 +82,7 @@ final class DiagnosticStore {
         if kind == .powerState {
             lastPower = facts
         }
-        if (kind == .powerState || kind == .observerState) && last[kind] == facts { return }
+        if kind == .powerState && last[kind] == facts { return }
         last[kind] = facts
         let time = now()
         if time - windowStart >= 60 || time < windowStart { windowStart = time; windowCount = 0 }
@@ -188,7 +183,7 @@ final class DiagnosticStore {
     }
     func flush() { queue.sync { drain(); prune() } }
     var queuedCount: Int { lock.lock(); defer { lock.unlock() }; return pending.count }
-    func export(to destination: URL, permissionReady: Bool, observer: CiscoObservation = CiscoObservation()) throws {
+    func export(to destination: URL, permissionReady: Bool) throws {
         guard exportLock.try() else { throw IssueCode.exportBusy }
         defer { exportLock.unlock() }
         flush()
@@ -220,20 +215,19 @@ final class DiagnosticStore {
             let at: Double
             let powerPermissionReady: Bool
             let power: DiagnosticFacts
-            let observer: CiscoObservation
             let storageFailed: Bool
         }
         lock.lock(); let power = lastPower; lock.unlock()
-        let summary = Summary(format: 2, appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "test",
+        let summary = Summary(format: 3, appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "test",
                               macOS: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)", architecture: architecture,
-                              at: now(), powerPermissionReady: permissionReady, power: power, observer: observer, storageFailed: storageFailed)
+                              at: now(), powerPermissionReady: permissionReady, power: power, storageFailed: storageFailed)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
         try encoder.encode(summary).write(to: stage.appendingPathComponent("summary.json"))
         let help = """
         NoSleep: информация для диагностики
         Напишите: что нажали, что ожидали, что получилось и примерное время ошибки.
         Архив: версии, состояния функций, коды ошибок и события NoSleep.
-        Нет паролей, логина, адреса VPN, IP, снимков экрана, профилей Cisco или системных журналов.
+        Нет секретов, IP, снимков экрана или системных журналов.
         Вы отправляете файл вручную. Логи: до 200 МБ (200 000 000 байт), до 7 дней; повторные опросы не записываются.
         """
         try Data(help.utf8).write(to: stage.appendingPathComponent("README.txt"))

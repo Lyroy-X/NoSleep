@@ -1,8 +1,8 @@
 import Foundation
 func featureExpect(_ expression: @autoclosure () throws -> Bool) throws { let result = try expression(); assert(result) }
-func aggregateTitle(system: Bool, display: Bool, observing: Bool = false) -> String { system || display || observing ? "Выключить всё" : "Включить всё" }
+func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }
 func featureTests() throws {
-    for bits in 0..<8 { assert(aggregateTitle(system: bits & 1 != 0, display: bits & 2 != 0, observing: bits & 4 != 0) == (bits == 0 ? "Включить всё" : "Выключить всё")) }
+    for bits in 0..<4 { assert(aggregateTitle(system: bits & 1 != 0, display: bits & 2 != 0) == (bits == 0 ? "Включить всё" : "Выключить всё")) }
     let power = FakePower(); let engine = GuardEngine(power)
     let on = DispatchSemaphore(value: 0)
     engine.act("all-on", save: false) { on.signal() }
@@ -14,7 +14,6 @@ func featureTests() throws {
     assert(off.wait(timeout: .now() + 3) == .success)
     let disabled = engine.queue.sync { engine.state() }
     assert(!disabled.systemWanted && !disabled.systemActual && !disabled.displayWanted && !disabled.displayActual && disabled.error == nil)
-    try observerTests()
     try diagnosticsTests()
     try diagnosticStreamingTests()
     if ProcessInfo.processInfo.environment["NOSLEEP_TEST_LARGE_LOGS"] == "1" { try diagnosticLargeBudgetTests() }
@@ -67,6 +66,18 @@ func diagnosticsTests() throws {
     let text = String(decoding: body, as: UTF8.self)
     assert(!text.contains("SENTINEL") && !text.contains("vpn.private.invalid"))
     assert(text.contains("sleepWanted") && text.contains("appVersion"))
+    let summaryProcess = Process(); let summaryOutput = Pipe()
+    summaryProcess.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+    summaryProcess.arguments = ["-p", zip.path, "summary.json"]; summaryProcess.standardOutput = summaryOutput
+    try summaryProcess.run()
+    let summaryData = summaryOutput.fileHandleForReading.readDataToEndOfFile(); summaryProcess.waitUntilExit()
+    assert(summaryProcess.terminationStatus == 0)
+    let summary = try JSONSerialization.jsonObject(with: summaryData) as! [String: Any]
+    assert(summary["format"] as? Int == 3)
+    assert(summary["observer"] == nil && summary["recovery"] == nil)
+    let powerSummary = summary["power"] as! [String: Any]
+    assert(powerSummary["sleepWanted"] != nil)
+    assert(!powerSummary.keys.contains { $0.lowercased().contains("vpn") || $0.lowercased().contains("observer") || $0.lowercased().contains("recovery") })
     assert(!FileManager.default.fileExists(atPath: root.appendingPathComponent("support-export").path))
     let old = DiagnosticRecord(at: Date().timeIntervalSince1970 - 8 * 24 * 3600, kind: .launch, facts: DiagnosticFacts())
     let recent = DiagnosticRecord(at: Date().timeIntervalSince1970, kind: .powerState, facts: DiagnosticFacts(sleepWanted: false))

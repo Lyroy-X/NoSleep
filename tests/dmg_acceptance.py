@@ -1,4 +1,6 @@
 """Check the final, read-only DMG after a fresh mount, not its staging folder."""
+import hashlib
+import os
 import plistlib
 import subprocess
 import sys
@@ -55,5 +57,14 @@ try:
     subprocess.run(['osascript', '-e', script, root.name], check=True)
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(root / 'NoSleep.app')], check=True)
     print('PASS: app signature remains valid', flush=True)
+    expected = Path(os.environ.get('NOSLEEP_DMG_APP', project / 'build/release/NoSleep.app')).resolve()
+    executable = root / 'NoSleep.app/Contents/MacOS/NoSleep'
+    assert hashlib.sha256(executable.read_bytes()).digest() == hashlib.sha256((expected / 'Contents/MacOS/NoSleep').read_bytes()).digest()
+    expected_info = plistlib.loads((expected / 'Contents/Info.plist').read_bytes())
+    packaged_info = plistlib.loads((root / 'NoSleep.app/Contents/Info.plist').read_bytes())
+    assert packaged_info == expected_info
+    arches = set(subprocess.check_output(['lipo', '-archs', str(executable)], text=True).split())
+    assert arches == {'arm64', 'x86_64'}, arches
+    print('PASS: exact requested release bundle/version and both CPU architectures, without copying the running old app', flush=True)
 finally:
     subprocess.run(['hdiutil', 'detach', str(root)], check=True)

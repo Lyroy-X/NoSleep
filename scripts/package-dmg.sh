@@ -1,9 +1,19 @@
 #!/bin/zsh
 set -euo pipefail
 project_dir=${0:A:h:h}
+# Packaging uses its own app output; the everyday running app must stay intact.
+export NOSLEEP_BUILD_APP="${NOSLEEP_BUILD_APP:-$project_dir/build/release/NoSleep.app}"
+export NOSLEEP_BUILD_CACHE="${NOSLEEP_BUILD_CACHE:-$project_dir/build/release-module-cache}"
+package_app=${NOSLEEP_BUILD_APP:A}
+image_output="${NOSLEEP_DMG_OUTPUT:-$project_dir/build/NoSleep-universal.dmg}"
+image_output=${image_output:A}
+if [[ "$image_output" != *.dmg ]]; then
+  print -u2 "Package output must be a .dmg image"
+  exit 2
+fi
+"$project_dir/scripts/build.sh" --universal
 export PYTHONPATH="$project_dir/build/packaging-python${PYTHONPATH:+:$PYTHONPATH}"
 python3 -c 'import ds_store, mac_alias'
-"$project_dir/scripts/build.sh" --universal
 work_dir=$(mktemp -d "$project_dir/build/dmg.XXXXXX")
 mount_dir=""
 cleanup() {
@@ -15,7 +25,7 @@ cleanup() {
 trap cleanup EXIT
 stage="$work_dir/staging"
 mkdir -p "$stage/.background"
-ditto "$project_dir/build/NoSleep.app" "$stage/NoSleep.app"
+ditto "$package_app" "$stage/NoSleep.app"
 ln -s /Applications "$stage/Программы"
 swiftc -module-cache-path "$project_dir/build/module-cache" "$project_dir/scripts/dmg-background.swift" -o "$project_dir/build/dmg-background"
 "$project_dir/build/dmg-background" "$stage/.background/background.png"
@@ -25,5 +35,6 @@ mount_dir=$(python3 -c 'import plistlib,sys; print(next(item["mount-point"] for 
 python3 "$project_dir/scripts/configure-dmg.py" "$mount_dir"
 sync
 hdiutil detach "$mount_dir"
-hdiutil convert "$work_dir/writable.dmg" -format UDZO -ov -o "$project_dir/build/NoSleep-universal.dmg"
-print "$project_dir/build/NoSleep-universal.dmg"
+mkdir -p "${image_output:h}"
+hdiutil convert "$work_dir/writable.dmg" -format UDZO -ov -o "$image_output"
+print "$image_output"
