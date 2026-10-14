@@ -52,3 +52,7 @@ real power/admin setup/lid/shutdown/Gatekeeper; the other task's uncommitted
 termination UI. Native Swift/shell/orchestration use black-box evidence rather
 than a claimed 100% Swift percentage. Python patch/Swift runtime differs across
 hosted platforms; actual runtime is retained, not inferred from the runner label.
+
+Hosted follow-up: PR #1 head `8e110a6c8c208aa4991225fd0b7c5e063d1daaef`, run `38557413768`: quality and ARM passed; Intel failed because the contract fixture compiled its read-only probe as ARM unconditionally (`OSError: Bad CPU type in executable`). Package was correctly skipped. The fixture now targets the actual native architecture and asserts the Mach-O slice; real power/VM behavior remains isolated. Hosted final-head validation is pending.
+
+Local follow-up checks: `scripts/test.sh --local` passed on Apple Silicon after the fix, including 19 power-handoff contracts; unchanged app packaging inputs retain their prior mounted-DMG evidence. The complete quality gate passed (48 focused tests, 12 assertion-killed mutations). The initial sandbox compile failed because the default Swift module cache was not writable; the complete authorized run outside that sandbox passed.

@@ -15,3 +15,6 @@
 ## Workflow follow-up
 - Only after explicit Git publication authorization, land the scoped change and observe first Actions run, release and authenticated download.
 - Keep the OpenSpec change active; archival was not requested.
+
+## 4. Hosted CI follow-up
+- [ ] 4.1 Fix the ARM-only contract probe on Intel and verify both complete hosted native lanes and package acceptance for the final PR head.
