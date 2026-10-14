@@ -1,11 +1,15 @@
 # NoSleep changes
 
-## [3.4.4]
+## [3.4.5]
 
 - Ask before closing NoSleep during Mac shutdown or restart; cancellation retains
-  sleep/display protection. Ordinary quit and logout keep their existing behavior.
-- Keep shutdown cleanup retryable and reveal errors if normal sleep cannot be restored.
-- Run native old/new bug proofs in both macOS CI lanes, preserving Ubuntu quality checks.
+  sleep/display protection and failed cleanup remains retryable.
+- Run native old/new bug proofs in macOS CI lanes, with safe Enter/Escape defaults
+  and a critical confirmation-bypass mutation.
+
+## [3.4.4]
+
+- Wait for actual isolated UI completion with a bounded monotonic deadline on loaded CI runners; verify delayed and missing completions.
 
 ## [3.4.3]
 

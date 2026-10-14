@@ -30,7 +30,7 @@ Build a separate candidate and run isolated checks. No install, Git mutation or 
 
 The operator explicitly requested a patch bump, universal DMG, release/DMG checks, commit, push and PR, after waiting for completed automated release work. The dependency chat completed; its reviewed changes were imported into an isolated feature/confirm-system-termination checkout from ffcd093827c158a5b95c29658dac9dca94a6ef1f. Unfinished redesign-native-ui remains outside scope.
 
-Version 3.4.4/build15 follows the completed 3.4.3/build14 automation candidate and exceeds actual main 3.4.2/build13. Both the fix and release/CI maintenance use a patch bump.
+Version 3.4.5/build16 follows the completed 3.4.3/build14 automation candidate and exceeds actual main 3.4.2/build13. Both the fix and release/CI maintenance use a patch bump.
 
 The regression test dispatches a quit Apple Event through NSAppleEventManager in its own test process. Its handler calls the unchanged public delegate API, so the same fixture compiles on the old revision. Old code permits termination and cleans up; fixed code cancels and retains both protections. A copied faulty confirmation guard must fail the same assertion. It links no real power, Keychain or accessibility actions.
 

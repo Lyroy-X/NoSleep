@@ -16,7 +16,7 @@
 
 - [x] 3.1 Add a compileable base/current native event regression and a confirmation-bypass mutation; run them with fake power.
 - [x] 3.2 Route native red-green proofs to macOS lanes and cover deferral/history/dependency rules with focused tests.
-- [x] 3.3 Update version to 3.4.4/build15, changelog and exact evidence; run full quality/native/package gates.
+- [x] 3.3 Update version to 3.4.5/build16, changelog and exact evidence; run full quality/native/package gates.
 - [x] 3.4 Prepare the reviewed staging manifest and English commit/PR text; verify no unrelated work is included.
 
 ## Publication follow-up
