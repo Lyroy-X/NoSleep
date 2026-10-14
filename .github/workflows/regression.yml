@@ -1,25 +1,152 @@
-name: NoSleep regression
+name: NoSleep CI
 
 "on":
   push:
+    branches-ignore: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      base_sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  regression:
-    runs-on: macos-latest
+  quality:
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Check out source
+      - name: Check out exact source and comparison history
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Unit, safety and 200-MB resource regression
-        run: ./scripts/test.sh --ci
+      - name: Install pinned quality dependencies in a private environment
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+      - name: Install quality dependencies
+        run: |
+          python3 -m venv build/ci-python
+          build/ci-python/bin/python -m pip install -r scripts/requirements-ci.txt
+      - name: Install verified workflow validator
+        run: |
+          mkdir -p build/tools
+          curl --fail --location --retry 2 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output build/tools/actionlint.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  build/tools/actionlint.tar.gz' | sha256sum --check
+          tar -xzf build/tools/actionlint.tar.gz -C build/tools actionlint
+      - name: Exact diff evidence, coverage, mutations and release contract
+        env:
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ]; then
+            if [ "$GITHUB_REF" = refs/heads/main ]; then
+              BASE_SHA=$(git rev-parse HEAD^)
+            else
+              BASE_SHA=$(git merge-base origin/main HEAD)
+            fi
+          fi
+          build/ci-python/bin/python scripts/check-quality.py --base "$BASE_SHA" --actionlint "$PWD/build/tools/actionlint"
+      - name: Retain quality receipts, coverage and mutation failures
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: quality-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/quality
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Capture actual native runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+      - name: Record actual native runtime
+        run: |
+          mkdir -p build/ci
+          sw_vers > build/ci/runtime.txt
+          uname -m >> build/ci/runtime.txt
+          swiftc --version >> build/ci/runtime.txt
+          python3 --version >> build/ci/runtime.txt
+      - name: Validate shell syntax without executing installers
+        run: |
+          for script in scripts/*.sh scripts/*.command; do
+            /bin/zsh -n "$script"
+          done
+      - name: Unit, safety, 200-MB resource and isolated native UI regression
+        run: ./scripts/test.sh --local > build/ci/regression.log 2>&1
+      - name: Retain native logs and isolated UI receipts
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/ci
+            build/ui-acceptance
+            .taskflow/log-budget
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  package:
+    needs: [quality, native-regression]
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare exact source and release version
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+      - name: Prepare package metadata
+        env:
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ]; then
+            if [ "$GITHUB_REF" = refs/heads/main ]; then
+              BASE_SHA=$(git rev-parse HEAD^)
+            else
+              BASE_SHA=$(git merge-base origin/main HEAD)
+            fi
+          fi
+          python3 scripts/release.py prepare --sha "$GITHUB_SHA" --base "$BASE_SHA" --directory build/github-release
+      - name: Install pinned packaging dependencies
+        run: python3 -m pip install --target build/packaging-python -r scripts/requirements-dmg.txt
+      - name: Build and verify the universal package
+        env:
+          NOSLEEP_DMG_OUTPUT: build/github-release/NoSleep-universal.dmg
+        run: |
+          ./scripts/package-dmg.sh
+          python3 tests/dmg_acceptance.py --ci build/github-release/NoSleep-universal.dmg
+          python3 scripts/release.py finalize --directory build/github-release --app build/release/NoSleep.app
+      - name: Pass only verified files to the publisher
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: nosleep-release-${{ github.sha }}
+          path: |
+            build/github-release/NoSleep-universal.dmg
+            build/github-release/SHA256SUMS.txt
+            build/github-release/release.json
+          if-no-files-found: error
+          retention-days: 14

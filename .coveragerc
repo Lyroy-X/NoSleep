@@ -1,0 +1,9 @@
+[run]
+branch = True
+relative_files = True
+parallel = True
+patch = subprocess
+include = scripts/*.py
+
+[report]
+show_missing = True
