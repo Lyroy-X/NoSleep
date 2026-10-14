@@ -1,4 +1,4 @@
-"""Check shipped macOS icon sizes/transparency and exact bundle resource identity."""
+"""Check shipped macOS icon sizes/background and exact bundle resource identity."""
 import os
 from pathlib import Path
 import plistlib
@@ -18,13 +18,13 @@ def png_header(path):
 
 
 class BrandAssetsAcceptance(unittest.TestCase):
-    def test_source_has_square_high_resolution_alpha(self):
+    def test_source_has_square_high_resolution_opaque_background(self):
         width, height, _, color = png_header(ROOT / 'Resources/NoSleep-icon.png')
         self.assertEqual(width, height)
         self.assertGreaterEqual(width, 1024)
-        self.assertIn(color, (4, 6), 'Icon source must retain an alpha channel')
+        self.assertEqual(color, 2, 'Full-bleed RGB source avoids a second system tile')
 
-    def test_icns_has_every_standard_and_retina_size_with_alpha(self):
+    def test_icns_has_every_standard_and_retina_size(self):
         with tempfile.TemporaryDirectory(prefix='nosleep-icon-check-') as directory:
             iconset = Path(directory) / 'NoSleep.iconset'
             subprocess.run(['iconutil', '-c', 'iconset', str(ROOT / 'Resources/NoSleep.icns'),
@@ -34,7 +34,7 @@ class BrandAssetsAcceptance(unittest.TestCase):
                     with self.subTest(size=size, scale=scale):
                         width, height, _, color = png_header(iconset / f'icon_{size}x{size}{suffix}.png')
                         self.assertEqual((width, height), (size * scale, size * scale))
-                        self.assertIn(color, (4, 6))
+                        self.assertIn(color, (2, 6))
 
     def test_built_bundle_uses_exact_approved_resource_and_version(self):
         app = Path(os.environ.get('NOSLEEP_APP', ROOT / 'build/regression/NoSleep.app'))

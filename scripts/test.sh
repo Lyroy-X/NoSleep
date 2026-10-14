@@ -21,6 +21,7 @@ python3 "$project_dir/tests/power_handoff_contract.py"
 python3 "$project_dir/tests/power_helper_installer_contract.py"
 "$project_dir/scripts/build.sh"
 python3 "$project_dir/tests/brand_assets_acceptance.py"
+swift -module-cache-path "$test_root/module-cache" "$project_dir/tests/icon_background_acceptance.swift" "$NOSLEEP_APP" "$project_dir/Resources/NoSleep-icon.png"
 python3 "$project_dir/tests/safety_contract.py" "$NOSLEEP_APP"
 if [[ "$mode" == --core ]]; then
   "$NOSLEEP_APP/Contents/MacOS/NoSleep" --self-test
