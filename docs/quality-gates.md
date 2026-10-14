@@ -59,7 +59,7 @@ fixture passes first, then an assertion must catch the injected fault.
 
 ## Lanes and evidence
 
-- Quality on Ubuntu: exact diff/test ownership, version/changelog/docs, Python
+- Quality on macOS (required for native AppKit red-green fixtures): exact diff/test ownership, version/changelog/docs, Python
   syntax, workflow validation, changed Python coverage and critical mutations.
 - Native regression on `macos-15` and `macos-15-intel`: shell syntax, build guards,
   unit/safety tests, real 200-MB/RSS fixture, isolated native UI and runtime receipt.

@@ -1,0 +1,26 @@
+[
+  {
+    "behavior": "Compact native utility presents confirmed protection, setup, pending and failure states while preserving independent controls and menus",
+    "mode": "new-capability",
+    "productionPaths": [
+      "Sources/NoSleep.swift",
+      "Sources/PowerPresentation.swift",
+      ".github/workflows/regression.yml"
+    ],
+    "tests": [
+      "Sources/PresentationTests.swift",
+      "Sources/UITests.swift",
+      "tests/compact_ci_acceptance.py"
+    ]
+  },
+  {
+    "behavior": "The existing native Shift-Command-A binding reaches the combined action instead of remaining unmatched",
+    "mode": "regression",
+    "productionPaths": [
+      "Sources/ApplicationMenu.swift"
+    ],
+    "tests": [
+      "Sources/UITests.swift"
+    ]
+  }
+]

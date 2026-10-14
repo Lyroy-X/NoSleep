@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   quality:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - name: Check out exact source and comparison history
@@ -36,8 +36,13 @@ jobs:
       - name: Install verified workflow validator
         run: |
           mkdir -p build/tools
-          curl --fail --location --retry 2 https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz --output build/tools/actionlint.tar.gz
-          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  build/tools/actionlint.tar.gz' | sha256sum --check
+          case "$(uname -m)" in
+            arm64) validator_arch=arm64; validator_sha=aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f ;;
+            x86_64) validator_arch=amd64; validator_sha=5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644 ;;
+            *) exit 1 ;;
+          esac
+          curl --fail --location --retry 2 "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_${validator_arch}.tar.gz" --output build/tools/actionlint.tar.gz
+          echo "$validator_sha  build/tools/actionlint.tar.gz" | shasum --algorithm 256 --check
           tar -xzf build/tools/actionlint.tar.gz -C build/tools actionlint
       - name: Exact diff evidence, coverage, mutations and release contract
         env:
@@ -91,6 +96,8 @@ jobs:
           done
       - name: Unit, safety, 200-MB resource and isolated native UI regression
         run: ./scripts/test.sh --local > build/ci/regression.log 2>&1
+      - name: Compact status confirmation mutation
+        run: python3 tests/compact_status_mutation.py
       - name: Retain native logs and isolated UI receipts
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -99,6 +106,7 @@ jobs:
           path: |
             build/ci
             build/ui-acceptance
+            build/compact-mutation
             .taskflow/log-budget
           include-hidden-files: true
           if-no-files-found: warn
