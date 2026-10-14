@@ -1,0 +1,8 @@
+[
+  {
+    "behavior": "The complete regression runner verifies a clean distributable checkout and retains standalone power bridge contracts without retired VM transport dependencies",
+    "mode": "preservation",
+    "productionPaths": ["scripts/test.sh"],
+    "tests": ["tests/public_repository_acceptance.py", "tests/power_handoff_contract.py"]
+  }
+]

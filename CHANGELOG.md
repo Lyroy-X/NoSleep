@@ -1,5 +1,14 @@
 # NoSleep changes
 
+## [3.5.1]
+
+- Remove the retired VPN laboratory and its dependent VM handoff runner, retaining the standalone power bridge and its isolated contracts.
+- Remove personal workstation paths from current project documentation.
+- Put release installation, checksum verification, first setup, updates and removal first in the README; remove commands for an absent signing test.
+- Add focused repository cleanup and documentation checks to the existing regression runner.
+
+Application sources and icons are unchanged. Real power, first administrative setup, shutdown/restart, lid closure and downloaded-app Gatekeeper behavior still require explicitly authorized manual acceptance; this maintenance update adds no Intel runtime acceptance.
+
 ## [3.5.0]
 
 - Temporarily disable Intel CI execution repository-wide for future PRs and main release verification; retain ARM gates and universal DMG cross-compilation.
