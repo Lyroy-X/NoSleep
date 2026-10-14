@@ -34,6 +34,8 @@ class TerminationRegressionTests(unittest.TestCase):
             # No new API is referenced by the driver. The old revision compiles without this module.
             if (ROOT / "Sources/Termination.swift").exists():
                 inputs.append(ROOT / "Sources/Termination.swift")
+            if (ROOT / "Sources/PowerPresentation.swift").exists():
+                inputs.append(ROOT / "Sources/PowerPresentation.swift")
             executable = case / "Fixture"
             compile_result = subprocess.run(["swiftc", "-module-cache-path", str(ROOT / "build/module-cache/termination-regression"), *map(str, inputs), "-o", str(executable)], capture_output=True, text=True, timeout=90)
             if compile_result.returncode:

@@ -20,8 +20,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.release["jobs"]["publish"]["needs"], "verify")
         self.assertEqual(self.release["jobs"]["verify"]["uses"], "./.github/workflows/regression.yml")
 
-    def test_ci_runs_native_both_architectures_and_package_after_quality(self):
-        self.assertEqual(self.ci["jobs"]["native-regression"]["strategy"]["matrix"]["runner"], ["macos-15", "macos-15-intel"])
+    def test_ci_runs_arm_only_for_future_prs_and_main_release(self):
+        for job in self.ci["jobs"].values():
+            self.assertEqual(job["runs-on"], "macos-15")
+            self.assertNotIn("strategy", job)
+        self.assertEqual(self.release["jobs"]["verify"]["uses"], "./.github/workflows/regression.yml")
         self.assertEqual(set(self.ci["jobs"]["package"]["needs"]), {"quality", "native-regression"})
         self.assertIn("pull_request", self.ci["on"])
         self.assertEqual(self.ci["on"]["push"]["branches-ignore"], ["main"])

@@ -28,7 +28,7 @@ func applicationMenu(target: NSObject? = nil) -> NSMenu {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.tag = tag; item.target = target; controls.submenu?.addItem(item)
     }
     controls.submenu?.addItem(.separator())
-    let all = NSMenuItem(title: "Включить всё", action: #selector(MenuApp.toggleAll), keyEquivalent: "a"); all.keyEquivalentModifierMask = [.command, .shift]; all.target = target; all.tag = 25
+    let all = NSMenuItem(title: "Включить всё", action: #selector(MenuApp.toggleAll), keyEquivalent: "A"); all.keyEquivalentModifierMask = [.command, .shift]; all.target = target; all.tag = 25
     controls.submenu?.addItem(all)
     let export = NSMenuItem(title: "Сохранить диагностику…", action: #selector(MenuApp.exportDiagnostics), keyEquivalent: "e"); export.target = target; export.tag = 27
     controls.submenu?.addItem(export); root.addItem(controls)

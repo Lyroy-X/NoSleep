@@ -420,6 +420,9 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     var setupLabel: NSTextField!
     var setupButton: NSButton!
     var setupRow: NSStackView!
+    var summaryLabel: NSTextField!
+    var summaryDetail: NSTextField!
+    var summaryIcon: NSImageView!
     var permissionReady: Bool?
     var setupError: String?
     var busy = false
@@ -431,7 +434,6 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     var exportButton: NSButton!
     var exporting = false
     private var handlingTermination = false
-    static let allToolbar = NSToolbarItem.Identifier("NoSleep.All")
     static let exportToolbar = NSToolbarItem.Identifier("NoSleep.Export")
 
     func writeUI() {
@@ -442,7 +444,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
                                   "setupVisible": !setupRow.isHidden, "sleepEnabled": sleepSwitch.isEnabled,
                                   "setupText": setupLabel.stringValue, "setupButtonTitle": setupButton.title,
                                   "allButtonTitle": allButton.title, "diagnosticsFailed": diagnostics.storageFailed,
-                                  "exporting": exporting]
+                                  "exporting": exporting, "summaryText": summaryLabel.stringValue]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]), data != lastUIData {
             try? data.write(to: dataDir.appendingPathComponent("ui.json"), options: .atomic); lastUIData = data
         }
@@ -459,11 +461,21 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         control.setAccessibilityLabel(title); control.toolTip = title
         return control
     }
-    func row(_ title: String, detail: NSTextField? = nil, control: NSView) -> NSStackView {
+    func symbolView(_ name: String, size: CGFloat = 22) -> NSImageView {
+        let view = NSImageView()
+        view.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        view.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: size, weight: .medium)
+        view.contentTintColor = .secondaryLabelColor
+        view.widthAnchor.constraint(equalToConstant: size + 2).isActive = true
+        view.heightAnchor.constraint(equalToConstant: size + 2).isActive = true
+        view.setAccessibilityElement(false)
+        return view
+    }
+    func row(_ title: String, detail: NSTextField? = nil, symbol: String, control: NSView) -> NSStackView {
         let labels = NSStackView(); labels.orientation = .vertical; labels.alignment = .leading; labels.spacing = 3
         labels.addArrangedSubview(uiLabel(title, size: 13, weight: .medium))
         if let detail = detail { labels.addArrangedSubview(detail) }
-        let result = NSStackView(views: [labels, control]); result.distribution = .fill; result.orientation = .horizontal; result.alignment = .centerY; result.spacing = 18
+        let result = NSStackView(views: [symbolView(symbol), labels, control]); result.distribution = .fill; result.orientation = .horizontal; result.alignment = .centerY; result.spacing = 12
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -477,71 +489,82 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     func card(_ rows: [NSView]) -> NSView {
         let box = NSBox(); box.boxType = .custom; box.titlePosition = .noTitle
         box.fillColor = .controlBackgroundColor; box.borderColor = .separatorColor
-        box.borderWidth = 0.5; box.cornerRadius = 9
-        let stack = NSStackView(views: rows); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        box.borderWidth = 0.5; box.cornerRadius = 12
+        let stack = NSStackView(views: rows); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 18
         stack.translatesAutoresizingMaskIntoConstraints = false
         box.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
                                      stack.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -16),
-                                     stack.topAnchor.constraint(equalTo: box.topAnchor, constant: 14),
-                                     stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -14)])
+                                     stack.topAnchor.constraint(equalTo: box.topAnchor, constant: 18),
+                                     stack.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -18)])
         for view in rows { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         return box
     }
     func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "NoSleep"; window.minSize = NSSize(width: 520, height: 590)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 430), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "NoSleep"; window.contentMinSize = NSSize(width: 440, height: 360)
         window.delegate = self; window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("NoSleep.MainWindow"); if !window.setFrameUsingName("NoSleep.MainWindow") { window.center() }
         allButton = NSButton(title: "Выключить всё", target: self, action: #selector(toggleAll)); allButton.bezelStyle = .rounded
         allButton.setAccessibilityLabel("Включить или выключить все функции NoSleep")
+        allButton.toolTip = "Включить или выключить обе защиты · ⇧⌘A"
         allButton.heightAnchor.constraint(equalToConstant: 28).isActive = true; allButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 135).isActive = true
         exportButton = NSButton(title: "Отчёт…", target: self, action: #selector(exportDiagnostics)); exportButton.bezelStyle = .rounded
         exportButton.toolTip = "Сохранить диагностику без паролей"
+        exportButton.setAccessibilityLabel("Сохранить диагностику NoSleep")
         exportButton.heightAnchor.constraint(equalToConstant: 28).isActive = true; exportButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 82).isActive = true
         let toolbar = NSToolbar(identifier: "NoSleep.Toolbar"); toolbar.delegate = self
         toolbar.displayMode = .iconOnly; toolbar.allowsUserCustomization = false
         window.toolbar = toolbar; window.toolbarStyle = .unifiedCompact
-        let scroll = NSScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        window.setContentSize(NSSize(width: 440, height: 430))
+        window.setFrameAutosaveName("NoSleep.MainWindow"); if !window.setFrameUsingName("NoSleep.MainWindow") { window.center() }
+        let scroll = FittingScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
+        scroll.drawsBackground = true; scroll.backgroundColor = .windowBackgroundColor
         let document = FlippedContentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
         window.contentView!.addSubview(scroll)
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
                                      scroll.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
                                      scroll.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
-                                     scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
-                                     document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)])
-        let body = NSStackView(); body.orientation = .vertical; body.alignment = .leading; body.spacing = 12
+                                     scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor)])
+        scroll.documentWidth = document.widthAnchor.constraint(equalToConstant: 440)
+        scroll.documentWidth?.isActive = true
+        let body = NSStackView(); body.orientation = .vertical; body.alignment = .leading; body.spacing = 16
         body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
-        NSLayoutConstraint.activate([body.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24),
-                                     body.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -24),
-                                     body.topAnchor.constraint(equalTo: document.topAnchor, constant: 20),
+        NSLayoutConstraint.activate([body.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 20),
+                                     body.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -20),
+                                     body.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
                                      body.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -20)])
+        summaryLabel = uiLabel("Проверяю готовность…", size: 22, weight: .bold)
+        summaryDetail = uiLabel("Проверяю доступ к защите сна.", secondary: true)
+        summaryIcon = symbolView("moon.stars", size: 30)
+        let summaryText = NSStackView(views: [summaryLabel, summaryDetail]); summaryText.orientation = .vertical; summaryText.alignment = .leading; summaryText.spacing = 5
+        summaryText.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let summary = NSStackView(views: [summaryIcon, summaryText]); summary.orientation = .horizontal; summary.alignment = .centerY; summary.spacing = 14
+        body.addArrangedSubview(summary); body.setCustomSpacing(24, after: summary)
         setupLabel = uiLabel("Проверяю готовность NoSleep…", secondary: true)
         setupButton = NSButton(title: "Настроить NoSleep", target: self, action: #selector(setupPower)); setupButton.bezelStyle = .rounded
-        setupRow = NSStackView(views: [setupLabel, setupButton]); setupRow.orientation = .horizontal; setupRow.alignment = .centerY; setupRow.spacing = 12
+        setupRow = NSStackView(views: [setupLabel, setupButton]); setupRow.orientation = .vertical; setupRow.alignment = .leading; setupRow.spacing = 8
         setupButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         body.addArrangedSubview(setupRow)
-        body.addArrangedSubview(uiLabel("Защита Mac", size: 13, weight: .semibold))
+        setupLabel.widthAnchor.constraint(equalTo: setupRow.widthAnchor).isActive = true
         sleepSwitch = switchControl("Mac не засыпает", action: #selector(toggleSleep))
         displaySwitch = switchControl("Экран не гаснет", action: #selector(toggleDisplay))
         sleepState = uiLabel("Проверяю…", secondary: true); displayState = uiLabel("Проверяю…", secondary: true)
-        let power = card([row("Mac не засыпает", detail: sleepState, control: sleepSwitch), separator(),
-                          row("Экран не гаснет", detail: displayState, control: displaySwitch)])
-        body.addArrangedSubview(power); body.setCustomSpacing(20, after: power)
-        let logBudget = uiLabel("До 200 МБ · хранение 7 дней · без паролей", secondary: true)
-        body.addArrangedSubview(uiLabel("Диагностика", size: 13, weight: .semibold)); body.addArrangedSubview(logBudget)
+        let power = card([row("Mac не засыпает", detail: sleepState, symbol: "laptopcomputer", control: sleepSwitch), separator(),
+                          row("Экран не гаснет", detail: displayState, symbol: "display", control: displaySwitch)])
+        body.addArrangedSubview(power)
+        let actions = NSStackView(views: [allButton, NSView()]); actions.orientation = .horizontal; actions.alignment = .centerY
+        body.addArrangedSubview(actions)
         errorLabel = uiLabel(""); errorLabel.textColor = .systemRed; errorLabel.isHidden = true; body.addArrangedSubview(errorLabel)
         let foot = uiLabel("Закрытие окна оставляет NoSleep работать в фоне.", size: 11, secondary: true); body.addArrangedSubview(foot)
+        body.addArrangedSubview(uiLabel("Отчёт… · до 200 МБ · 7 дней · без паролей", size: 11, secondary: true))
         for view in body.arrangedSubviews { view.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true }
     }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, Self.allToolbar, Self.exportToolbar] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, Self.exportToolbar] }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         let item = NSToolbarItem(itemIdentifier: identifier)
-        if identifier == Self.allToolbar {
-            item.view = allButton; item.label = "Все функции"
-        } else if identifier == Self.exportToolbar {
+        if identifier == Self.exportToolbar {
             item.view = exportButton; item.label = "Диагностика"
         } else { return nil }
         return item
@@ -598,6 +621,12 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     func render() {
         guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.render() }; return }
         guard window != nil, item != nil else { return }
+        let summary = PowerPresentation.make(systemWanted: current.systemWanted, systemActual: current.systemActual,
+                                             displayWanted: current.displayWanted, displayActual: current.displayActual,
+                                             permissionReady: permissionReady, busy: busy, hasError: setupError != nil || current.error != nil)
+        summaryLabel.stringValue = summary.title; summaryDetail.stringValue = summary.detail
+        summaryIcon.image = NSImage(systemSymbolName: summary.symbol, accessibilityDescription: nil)
+        summaryIcon.contentTintColor = summary.tone == .attention ? .systemOrange : summary.tone == .active ? .controlAccentColor : .secondaryLabelColor
         allButton.title = aggregateTitle(system: current.systemWanted, display: current.displayWanted)
         allButton.isEnabled = !busy
         item.menu?.item(withTag: 5)?.title = allButton.title; item.menu?.item(withTag: 5)?.isEnabled = allButton.isEnabled
@@ -711,6 +740,21 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
 
 final class FlippedContentView: NSView { override var isFlipped: Bool { true } }
 
+final class FittingScrollView: NSScrollView {
+    var documentWidth: NSLayoutConstraint?
+    override func tile() {
+        super.tile()
+        // NSScrollView tiles legacy scrollers by changing its clip frame directly.
+        // A clip-view width anchor can retain the previous autoresizing width.
+        if let width = documentWidth, width.constant != contentView.bounds.width {
+            width.constant = contentView.bounds.width
+        }
+        if let document = documentView, document.frame.width != contentView.bounds.width {
+            document.setFrameSize(NSSize(width: contentView.bounds.width, height: document.frame.height))
+        }
+    }
+}
+
 @main enum NoSleepMain {
 static func main() {
 do {
@@ -721,6 +765,7 @@ do {
         try featureTests()
         try uiTests()
         try brandTests()
+        try presentationTests()
         try terminationTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)

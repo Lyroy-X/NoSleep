@@ -18,6 +18,7 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         app.setActivationPolicy(.accessory)
         let owner = MenuApp()
         owner.buildWindow()
+        owner.window.orderFront(nil)
         owner.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         owner.item.menu = NSMenu()
         app.mainMenu = applicationMenu(target: owner)
@@ -28,11 +29,13 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         try FileManager.default.createDirectory(at: UIHarnessEnvironment.dataDirectory, withIntermediateDirectories: true)
         owner.render()
         try uiTests(runTerminationRegression: false)
+        try presentationTests()
         let controls = walk(owner.window.contentView!).compactMap { $0 as? NSSwitch }
         require(controls.count == 2, "only independent sleep and display switches remain")
         let labels = walk(owner.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
         require(!labels.contains { $0.contains("VPN") || $0.contains("Cisco") }, "native window has no VPN status or settings")
-        require(owner.window.toolbar != nil && owner.window.minSize.width == 520, "toolbar, resizing and native layout preserved")
+        require(owner.window.toolbar != nil && owner.window.contentMinSize == NSSize(width: 440, height: 360), "compact minimum content size and native resizing preserved")
+        require(owner.window.contentView!.bounds.size == NSSize(width: 440, height: 430), "fresh window has selected 440x430 content size")
         func drain() {
             require(waitForUI({ !owner.busy }), "action completion leaves controls available")
         }
@@ -46,6 +49,7 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         require(ProcessInfo.processInfo.systemUptime - delayedAt >= 0.25, "delayed completion beyond the old 150-ms deadline is observed")
         owner.engine.deferCompletion = false
         require(owner.current.displayWanted && !owner.current.systemWanted, "display switch leaves sleep protection independent")
+        require(owner.summaryLabel.stringValue == "Экран под защитой", "headline confirms only the enabled display protection")
         let menu = app.mainMenu!.items.first { $0.title == "Управление" }!.submenu!
         let sleep = menu.item(withTag: 22)!
         require(app.sendAction(sleep.action!, to: sleep.target, from: sleep), "native menu routes sleep action")
@@ -57,6 +61,7 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         require(owner.current.systemWanted && owner.current.displayWanted && owner.allButton.title == "Выключить всё", "combined action enables both power features")
         owner.permissionReady = false; owner.render()
         require(!owner.sleepSwitch.isEnabled && owner.displaySwitch.isEnabled && !owner.setupRow.isHidden, "first-run permission state preserves display control and setup")
+        try compactNativeAcceptance(owner)
         let snapshot = try Data(contentsOf: UIHarnessEnvironment.dataDirectory.appendingPathComponent("ui.json"))
         let fields = try JSONSerialization.jsonObject(with: snapshot) as! [String: Any]
         require(!fields.keys.contains { $0.lowercased().contains("vpn") || $0.lowercased().contains("recovery") || $0.lowercased().contains("observer") }, "UI snapshot contains only current app features")

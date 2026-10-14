@@ -60,14 +60,18 @@ fixture passes first, then an assertion must catch the injected fault.
 
 ## Lanes and evidence
 
-- Quality on Ubuntu: exact diff/test ownership, version/changelog/docs, Python
+- Quality on macOS (required for native AppKit red-green fixtures): exact diff/test ownership, version/changelog/docs, Python
   syntax, workflow validation, changed Python coverage and critical mutations.
-- Native regression on `macos-15` and `macos-15-intel`: shell syntax, build guards,
+- Native regression on Apple Silicon `macos-15` only: shell syntax, build guards,
   unit/safety tests, real 200-MB/RSS fixture, isolated native UI and runtime receipt.
 - Package: after both preceding lanes, build universal DMG, mount read-only, verify
   signature, version, exact app bytes, both architectures, stored layout and arrow.
 - Publication: only main push; same run's verified package, restricted write job,
   draft upload verification, exact source tag, resumable retry, no published overwrite.
+
+Intel runner execution is temporarily disabled in the shared workflow for all future
+PRs, branch pushes, manual runs and main release verification. Re-enabling it requires
+an explicit workflow change; universal DMG cross-compilation is retained.
 
 Logs, coverage and mutation/UI receipts are Actions artifacts for 14 days, including
 failures. The packaging artifact is the exact file passed to publication.
@@ -89,5 +93,5 @@ No workflow changes branch protection or repository visibility. A maintainer can
 still merge a red check or push directly when protection is absent; policy is to
 merge only green CI. A failed main check blocks its release, not the Git operation.
 Real power changes, first admin setup, shutdown/restart, lid closure and Gatekeeper
-on another Mac require explicit manual acceptance. Hosted Intel/UI execution and
-actual release download remain unverified until a real Actions run is observed.
+on another Mac require explicit manual acceptance. Intel runtime acceptance is intentionally outside the current CI. Hosted ARM/UI
+execution and actual release download require observation of a real Actions run.
