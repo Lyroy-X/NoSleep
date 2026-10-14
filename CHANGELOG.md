@@ -2,6 +2,8 @@
 
 ## [3.5.0]
 
+- Temporarily disable Intel CI execution repository-wide for future PRs and main release verification; retain ARM gates and universal DMG cross-compilation.
+
 - Redesign the native NoSleep window as a compact 440×430 utility with one grouped pair of independent protection switches.
 - Add an overall status that distinguishes confirmed protection, applying commands, permission checking and failure; keep retry and first-run feedback visible.
 - Correct the native Shift-Command-A declaration so the existing shortcut reaches its action.
@@ -10,6 +12,15 @@
 - Verify status boundaries and isolated AppKit interactions/layout in light, dark and high-contrast appearances; record universal-package and regression evidence separately.
 
 Real power, first administrative setup, shutdown/restart, lid closure and downloaded-app Gatekeeper behavior require explicitly authorized manual acceptance. Local Apple Silicon checks do not prove native Intel execution or a published GitHub release.
+
+## [3.4.5]
+
+- Ask before closing NoSleep during Mac shutdown or restart; cancellation retains
+  sleep/display protection and failed cleanup remains retryable.
+- Run native old/new bug proofs in macOS CI lanes, with safe Enter/Escape defaults
+  and a critical confirmation-bypass mutation.
+- Avoid repeating compiler-based regression checks inside the bounded UI fixture;
+  keep them in the complete native suite and retain every dialog assertion.
 
 ## [3.4.4]
 

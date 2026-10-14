@@ -13,7 +13,7 @@ ui=ui.replace(old,'UIHarnessEnvironment.dataDirectory').replace('UserDefaults.st
 (case/'UI.swift').write_text('import AppKit\n'+ui)
 bundle='local.NoSleep.UIFixture.'+uuid.uuid4().hex
 app=case/'Fixture.app';exe=app/'Contents/MacOS/Fixture';exe.parent.mkdir(parents=True)
-inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift',root/'Sources/NoSleepBrand.swift',root/'Sources/PowerPresentation.swift',root/'Sources/PresentationTests.swift']
+inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'tests/ui_harness/TerminationAcceptance.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift',root/'Sources/Termination.swift',root/'Sources/NoSleepBrand.swift',root/'Sources/PowerPresentation.swift',root/'Sources/PresentationTests.swift']
 (case/'Aggregate.swift').write_text('func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }\n');inputs.append(case/'Aggregate.swift')
 result=subprocess.run(['swiftc','-D','NOSLEEP_UI_FIXTURE','-module-cache-path',str(root/'build/module-cache/ui-rollback'),*map(str,inputs),'-o',str(exe)],capture_output=True,text=True,timeout=90)
 (case/'compile.log').write_text(result.stdout+result.stderr)
@@ -26,6 +26,7 @@ subprocess.run(['codesign','--force','--sign','-',str(app)],check=True,capture_o
 run=subprocess.run([str(exe),str(case),bundle],capture_output=True,text=True,timeout=30)
 (case/'runtime.log').write_text(run.stdout+run.stderr)
 assert run.returncode==0,run.stdout+run.stderr
+assert "PASS: system quit cancellation and critical confirmation mutation" not in run.stdout, "UI fixture repeated the compiler-based regression instead of its own dialog tests"
 receipt={'result':'passed','level':'e2e','scope':'current native UI with isolated power model','realPowerActions':0,'installedAppActions':0,'networkActions':0,'inputs':{str(p.relative_to(root)) if p.is_relative_to(root) else str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}}
 (case/'receipt.json').write_text(json.dumps(receipt,indent=2))
 print(run.stdout);print('Evidence:',case)

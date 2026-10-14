@@ -10,7 +10,9 @@
     "tests": [
       "Sources/PresentationTests.swift",
       "Sources/UITests.swift",
-      "tests/compact_ci_acceptance.py"
+      "tests/compact_ci_acceptance.py",
+      "tests/workflow_acceptance.py",
+      "tests/termination_regression.py"
     ]
   },
   {

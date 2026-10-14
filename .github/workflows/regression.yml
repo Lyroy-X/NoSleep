@@ -66,17 +66,15 @@ jobs:
           retention-days: 14
 
   native-regression:
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-15, macos-15-intel]
-    runs-on: ${{ matrix.runner }}
+    # Intel execution is disabled repository-wide until explicitly re-enabled.
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Capture actual native runtime
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -94,6 +92,19 @@ jobs:
           for script in scripts/*.sh scripts/*.command; do
             /bin/zsh -n "$script"
           done
+      - name: Prove native regressions on the comparison base
+        env:
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          python3 -m pip install -r scripts/requirements-ci.txt
+          if [ -z "$BASE_SHA" ]; then
+            if [ "$GITHUB_REF" = refs/heads/main ]; then
+              BASE_SHA=$(git rev-parse HEAD^)
+            else
+              BASE_SHA=$(git merge-base origin/main HEAD)
+            fi
+          fi
+          python3 scripts/check-quality.py --base "$BASE_SHA" --native-regression-proofs
       - name: Unit, safety, 200-MB resource and isolated native UI regression
         run: ./scripts/test.sh --local > build/ci/regression.log 2>&1
       - name: Compact status confirmation mutation
@@ -102,9 +113,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: native-${{ matrix.runner }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: native-macos-15-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             build/ci
+            build/quality
+            build/termination-regression
             build/ui-acceptance
             build/compact-mutation
             .taskflow/log-budget

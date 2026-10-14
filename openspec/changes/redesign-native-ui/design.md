@@ -18,8 +18,8 @@ See proposal.md. The current production window is AppKit, with independent reque
 - Keep engine queue, one-second polling, command routing and permission gates unchanged. No performance improvement is claimed; use narrow isolated rendering/idle observations if available.
 - Correct the existing Shift-Command-A native key equivalent to uppercase A. A private diagnostic proved lowercase a with a correct shifted event remains unmatched and uppercase A reaches the fake action; keep the intended shortcut and handlers unchanged. Run the full quality lane on macOS to execute native base-snapshot regression proof without bypassing any gate.
 - Keep the combined action under the controls and diagnostics in the toolbar; retain all actions in menus. Preserve native window restoration, keyboard access and accessibility labels.
-- Prepare an isolated feature branch, updated to verified remote main 9b0803985ced72b658dbd696fe2bb4cb7fbf5f02 after the release workflow landed. Do not stage or publish the original checkout's unrelated dirty files.
-- Proposed version: 3.5.0/build 16, reflecting the compatible compact presentation capability and exceeding current main 3.4.4/build 15. Recompute if main moves.
+- Prepare an isolated feature branch, updated to verified remote main 385fa5e7cc90aae50e681e7486f30b8413b0407d after the release workflow landed. Do not stage or publish the original checkout's unrelated dirty files.
+- Proposed version: 3.5.0/build 17, reflecting the compatible compact presentation capability and exceeding current main 3.4.5/build 16. Recompute if main moves.
 
 ## Risks / Trade-offs
 
@@ -32,3 +32,5 @@ See proposal.md. The current production window is AppKit, with independent reque
 ## Verification
 
 Focused state/layout tests, isolated local native E2E, current-main complete regression, release acceptance where available, universal DMG and package acceptance. Record exact source/config/runtime/command identities; an unavailable or failed gate is not replaced by a targeted success. Agent review occurs in this conversation; the operator selected no personal implementation review.
+
+User follow-up: disable Intel CI completely in the shared workflow for all future PRs and main verification until explicitly re-enabled. Keep ARM quality/native/package checks and universal DMG cross-compilation.

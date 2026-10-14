@@ -25,3 +25,5 @@
 
 - Leave this OpenSpec change active; no archival was requested.
 - Resolve Taskflow's final memory/no-save choice after the engineering report. No scope registration or save is authorized by this plan.
+
+- [x] 4.1 Disable Intel CI repository-wide at the user’s explicit request; test future PR/main shared scheduling and assertion-based rejection of Intel reintroduction.

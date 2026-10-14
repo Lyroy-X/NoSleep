@@ -16,8 +16,9 @@ class CompactCI(unittest.TestCase):
     def contract(self, workflow):
         self.assertEqual(workflow['jobs']['quality']['runs-on'], 'macos-15', 'native red-green proof requires AppKit')
         native = workflow['jobs']['native-regression']
-        self.assertEqual(native['strategy']['matrix']['runner'], ['macos-15', 'macos-15-intel'])
-        self.assertEqual(native['runs-on'], '${{ matrix.runner }}')
+        for job in workflow['jobs'].values():
+            self.assertEqual(job['runs-on'], 'macos-15', 'Intel execution is disabled for every CI entry point')
+            self.assertNotIn('strategy', job, 'No hidden Intel matrix may be scheduled')
         self.assertFalse(native.get('continue-on-error', False))
         steps = native['steps']
         runs = [(i, step) for i, step in enumerate(steps) if 'run' in step]
@@ -33,13 +34,13 @@ class CompactCI(unittest.TestCase):
             self.assertFalse(step.get('continue-on-error', False))
         self.assertEqual(set(workflow['jobs']['package']['needs']), {'quality', 'native-regression'})
 
-    def test_real_workflow_runs_ui_and_assertion_mutation_on_both_cpus(self):
+    def test_real_workflow_runs_ui_and_assertion_mutation_on_arm_only(self):
         self.contract(yaml.safe_load((ROOT / '.github/workflows/regression.yml').read_text()))
 
     def test_faulty_ui_scheduling_is_rejected_by_assertion(self):
         original = yaml.safe_load((ROOT / '.github/workflows/regression.yml').read_text())
         self.contract(original)
-        for fault in ['missing-ui', 'missing-mutation', 'skip-mutation', 'ignore-failure', 'missing-intel']:
+        for fault in ['missing-ui', 'missing-mutation', 'skip-mutation', 'ignore-failure', 'intel-runner', 'intel-matrix']:
             with self.subTest(fault=fault):
                 bad = copy.deepcopy(original)
                 native = bad['jobs']['native-regression']
@@ -53,8 +54,10 @@ class CompactCI(unittest.TestCase):
                     mutation['if'] = 'false'
                 elif fault == 'ignore-failure':
                     ui['continue-on-error'] = True
+                elif fault == 'intel-runner':
+                    native['runs-on'] = 'macos-15-intel'
                 else:
-                    native['strategy']['matrix']['runner'].remove('macos-15-intel')
+                    native['strategy'] = {'matrix': {'runner': ['macos-15', 'macos-15-intel']}}
                 with self.assertRaises(AssertionError):
                     self.contract(bad)
 

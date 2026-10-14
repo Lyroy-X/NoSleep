@@ -58,3 +58,14 @@ Automated verification SHALL use separate build/state and fake power dependencie
 #### Scenario: Local E2E
 - **WHEN** the selected local E2E runs
 - **THEN** it verifies current native UI routes, state transitions and layout using the isolated fixture and records its input identities
+
+### Requirement: ARM-only CI until explicit re-enablement
+The shared CI workflow SHALL execute quality, native regression and package jobs only on Apple Silicon for all future pull requests, branch pushes, manual runs and main release verification. Intel execution SHALL remain disabled until explicitly re-enabled; universal DMG cross-compilation SHALL remain available.
+
+#### Scenario: Future pull request or main release
+- **WHEN** a pull request or main release invokes the shared workflow
+- **THEN** no Intel runner or matrix is scheduled and the package waits for ARM quality and native regression
+
+#### Scenario: Accidental Intel reintroduction
+- **WHEN** an Intel runner or matrix is introduced without updating the accepted contract
+- **THEN** the focused workflow acceptance rejects it by assertion

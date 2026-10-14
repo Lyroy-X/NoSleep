@@ -15,6 +15,7 @@ are retained in receipts/logs instead of claiming identical patch/toolchain buil
 python3 -m venv build/ci-python
 build/ci-python/bin/python -m pip install -r scripts/requirements-ci.txt
 build/ci-python/bin/python scripts/check-quality.py --base <base-sha> --worktree --actionlint /absolute/path/to/actionlint
+build/ci-python/bin/python scripts/check-quality.py --base <base-sha> --worktree --native-regression-proofs
 ./scripts/test.sh --local
 python3 -m pip install --target build/packaging-python -r scripts/requirements-dmg.txt
 ./scripts/package-dmg.sh
@@ -43,7 +44,7 @@ Declarations cannot authorize commands or external actions.
 
 For bug fixes, `regression` tests run in a disposable read-only archive of the
 base plus only the declared test files. Python must produce a unittest assertion
-failure rather than a missing import. Native Swift must compile first and then
+failure rather than a missing import. Native Swift proofs execute only in the macOS lanes and must compile first and then
 fail its self-test; compile failures do not qualify. Fixture-dependent tests must
 remain self-contained or declare changed test support as tests. New capabilities
 and preservation use green focused tests and coverage/mutation evidence; their
@@ -61,12 +62,16 @@ fixture passes first, then an assertion must catch the injected fault.
 
 - Quality on macOS (required for native AppKit red-green fixtures): exact diff/test ownership, version/changelog/docs, Python
   syntax, workflow validation, changed Python coverage and critical mutations.
-- Native regression on `macos-15` and `macos-15-intel`: shell syntax, build guards,
+- Native regression on Apple Silicon `macos-15` only: shell syntax, build guards,
   unit/safety tests, real 200-MB/RSS fixture, isolated native UI and runtime receipt.
 - Package: after both preceding lanes, build universal DMG, mount read-only, verify
   signature, version, exact app bytes, both architectures, stored layout and arrow.
 - Publication: only main push; same run's verified package, restricted write job,
   draft upload verification, exact source tag, resumable retry, no published overwrite.
+
+Intel runner execution is temporarily disabled in the shared workflow for all future
+PRs, branch pushes, manual runs and main release verification. Re-enabling it requires
+an explicit workflow change; universal DMG cross-compilation is retained.
 
 Logs, coverage and mutation/UI receipts are Actions artifacts for 14 days, including
 failures. The packaging artifact is the exact file passed to publication.
@@ -88,5 +93,5 @@ No workflow changes branch protection or repository visibility. A maintainer can
 still merge a red check or push directly when protection is absent; policy is to
 merge only green CI. A failed main check blocks its release, not the Git operation.
 Real power changes, first admin setup, shutdown/restart, lid closure and Gatekeeper
-on another Mac require explicit manual acceptance. Hosted Intel/UI execution and
-actual release download remain unverified until a real Actions run is observed.
+on another Mac require explicit manual acceptance. Intel runtime acceptance is intentionally outside the current CI. Hosted ARM/UI
+execution and actual release download require observation of a real Actions run.

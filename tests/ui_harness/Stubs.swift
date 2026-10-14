@@ -27,6 +27,8 @@ final class GuardEngine {
     var changed: ((LiveState) -> Void)?
     var fixtureActionsAllowed = false, deferCompletion = false
     private(set) var fixtureCommands: [String] = []
+    private(set) var fixtureShutdownCount = 0
+    var fixtureRejectShutdown = false
     private var fixtureState = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
     private var pendingCompletion: (() -> Void)?
     init(_ power: MacPower) { protection = HarnessProtection(power) }
@@ -51,7 +53,13 @@ final class GuardEngine {
     }
     func state() -> LiveState { guard fixtureActionsAllowed else { uiForbidden("power state") }; return fixtureState }
     func start() { uiForbidden("normal app lifecycle/power watchdog") }
-    func shutdownNow() throws { uiForbidden("power shutdown") }
+    func shutdownNow() throws {
+        guard fixtureActionsAllowed, Thread.isMainThread else { uiForbidden("power shutdown") }
+        fixtureShutdownCount += 1
+        if fixtureRejectShutdown { throw PowerError(message: "Fixture cleanup denied") }
+        fixtureState = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
+        changed?(fixtureState)
+    }
 }
 struct PowerSetupPlan {
     init(account: String, uid: UInt32) {}
@@ -69,13 +77,18 @@ final class DiagnosticStore {
     let storageFailed = false
     var fixturePowerActionsAllowed = false
     private(set) var powerActionCount = 0
+    private(set) var shutdownCount = 0, flushCount = 0
     init(root: URL) { self.root = root }
     func record(_ kind: DiagnosticKind, _ facts: DiagnosticFacts = DiagnosticFacts()) {
+        if fixturePowerActionsAllowed, case .shutdown = kind { shutdownCount += 1; return }
         guard fixturePowerActionsAllowed, case .powerAction = kind, let index = facts.number, (0..<6).contains(index) else { uiForbidden("normal diagnostics recorder") }
         // Deliberately in-memory: never start log files, exports or production snapshots.
         powerActionCount += 1
     }
     func snapshot(_ state: LiveState) { uiForbidden("normal app state write") }
-    func flush() { uiForbidden("normal diagnostics flush") }
+    func flush() {
+        guard fixturePowerActionsAllowed, shutdownCount > flushCount else { uiForbidden("normal diagnostics flush") }
+        flushCount += 1
+    }
     func export(to: URL, permissionReady: Bool) throws { uiForbidden("support export") }
 }

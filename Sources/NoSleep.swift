@@ -433,6 +433,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     var allButton: NSButton!
     var exportButton: NSButton!
     var exporting = false
+    private var handlingTermination = false
     static let exportToolbar = NSToolbarItem.Identifier("NoSleep.Export")
 
     func writeUI() {
@@ -715,10 +716,25 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     @objc func quitApp() { NSApplication.shared.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminationReply(for: NSAppleEventManager.shared().currentAppleEvent) { request in
+            sender.activate(ignoringOtherApps: true)
+            return runSystemTerminationConfirmation(request.confirmationAlert())
+        }
+    }
+    func terminationReply(for event: NSAppleEventDescriptor?, confirm: (SystemTerminationRequest) -> Bool) -> NSApplication.TerminateReply {
+        // runModal processes UI events: another quit must not bypass the pending decision.
+        guard !handlingTermination else { return .terminateCancel }
+        handlingTermination = true
+        defer { handlingTermination = false }
+        if let request = SystemTerminationRequest(event: event), !confirm(request) { return .terminateCancel }
         do {
             try engine.shutdownNow()
             diagnostics.record(.shutdown); diagnostics.flush(); return .terminateNow
-        } catch { errorLabel.stringValue = "Не удалось снять защиту: \(error.localizedDescription)"; errorLabel.isHidden = false; return .terminateCancel }
+        } catch {
+            errorLabel.stringValue = "Не удалось снять защиту: \(error.localizedDescription)"
+            errorLabel.isHidden = false; showWindow()
+            return .terminateCancel
+        }
     }
 }
 
@@ -750,6 +766,7 @@ do {
         try uiTests()
         try brandTests()
         try presentationTests()
+        try terminationTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
     } else if CommandLine.arguments.contains("--verify-setup-script") {
