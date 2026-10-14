@@ -1,0 +1,8 @@
+- [x] Freeze base and record user selections; create isolated feature branch.
+- [x] Remove the lab and its dependent VM modules; retain bridge code and tests.
+- [x] Remove personal paths and rewrite installation documentation.
+- [x] Increment patch/build and add changelog/focused evidence.
+- [x] Run focused and full quality/native verification.
+- [x] Complete package acceptance, including clean detach; recover the initial Resource busy failure and pass acceptance of the same DMG.
+- [x] Review complete diff and rescan current checkout for secrets.
+- [x] Prepare the reviewed branch for a PR; follow remote CI in the PR and leave merge to the user.

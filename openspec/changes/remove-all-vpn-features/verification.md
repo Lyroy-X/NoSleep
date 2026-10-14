@@ -1,6 +1,6 @@
 # Verification: remove-all-vpn-features
 
-Scope: /Users/robertoguzov/Dev/Work/NoSleep, all VPN features removed from production, unrelated features preserved.
+Scope: the NoSleep repository, all VPN features removed from production, unrelated features preserved.
 Code state: HEAD 0beea41c337a3e773cfd6eec76d3e35f213a2b7f plus working diff; final source/binary hashes in .taskflow/vpn-rollback-20261014/final-receipt.json.
 
 | Requirement / scenario | Implementation | Check / evidence | Result |
