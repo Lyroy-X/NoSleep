@@ -10,6 +10,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 MUTATIONS = [
+    ("check-quality.py", 'if native and sys.platform != "darwin":', "if False:", "quality_runner_acceptance.py"),
     ("release.py", "version_tuple(version) <= version_tuple(old_version)", "False", "release_acceptance.py"),
     ("release.py", "if build <= old_build:", "if False:", "release_acceptance.py"),
     ("release.py", "target is not None and target != source_sha", "False", "release_acceptance.py"),

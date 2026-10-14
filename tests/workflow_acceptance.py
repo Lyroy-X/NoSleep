@@ -27,6 +27,17 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.ci["on"]["push"]["branches-ignore"], ["main"])
         self.assertIn("--local", "\n".join(step.get("run", "") for step in self.ci["jobs"]["native-regression"]["steps"]))
 
+    def test_native_bug_proofs_are_macos_only_and_have_complete_history(self):
+        job = self.ci["jobs"]["native-regression"]
+        checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+        self.assertEqual(checkout["with"]["fetch-depth"], 0)
+        native = next(step for step in job["steps"] if "--native-regression-proofs" in step.get("run", ""))
+        self.assertIn("--base", native["run"])
+        self.assertIn("requirements-ci.txt", native["run"])
+        quality = "\n".join(step.get("run", "") for step in self.ci["jobs"]["quality"]["steps"])
+        self.assertNotIn("--native-regression-proofs", quality)
+        self.assertLess(job["steps"].index(native), next(i for i, step in enumerate(job["steps"]) if "scripts/test.sh" in step.get("run", "")))
+
     def test_actions_are_pinned_checkouts_do_not_persist_credentials(self):
         for workflow in (self.ci, self.release):
             for job in workflow["jobs"].values():

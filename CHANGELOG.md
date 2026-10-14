@@ -1,5 +1,14 @@
 # NoSleep changes
 
+## [3.4.5]
+
+- Ask before closing NoSleep during Mac shutdown or restart; cancellation retains
+  sleep/display protection and failed cleanup remains retryable.
+- Run native old/new bug proofs in macOS CI lanes, with safe Enter/Escape defaults
+  and a critical confirmation-bypass mutation.
+- Avoid repeating compiler-based regression checks inside the bounded UI fixture;
+  keep them in the complete native suite and retain every dialog assertion.
+
 ## [3.4.4]
 
 - Wait for actual isolated UI completion with a bounded monotonic deadline on loaded CI runners; verify delayed and missing completions.

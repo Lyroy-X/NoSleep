@@ -1,0 +1,14 @@
+[
+  {
+    "behavior": "Cancelling Mac shutdown/restart preserves NoSleep and protection; explicit quit cleanup remains retryable",
+    "mode": "regression",
+    "productionPaths": [
+      "Sources/NoSleep.swift",
+      "Sources/Termination.swift"
+    ],
+    "tests": [
+      "Sources/UITests.swift",
+      "tests/termination_regression.py"
+    ]
+  }
+]

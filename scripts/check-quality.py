@@ -37,9 +37,15 @@ def quality_base(base):
     return ADOPTION_BASE
 
 
-def regression_proofs(declarations, base, output):
+def regression_proofs(declarations, base, output, native_only=False):
     for index, declaration in enumerate(declarations):
         if declaration["mode"] != "regression":
+            continue
+        native = any(path.startswith("Sources/") for path in declaration["tests"])
+        if native_only and not native:
+            continue
+        if native and sys.platform != "darwin":
+            (output / f"red-green-{index}.log").write_text("DEFERRED: native proof is required in both macOS lanes\n")
             continue
         with tempfile.TemporaryDirectory(prefix="nosleep-red-green-") as directory:
             candidate = Path(directory).resolve()
@@ -75,7 +81,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
     parser.add_argument("--worktree", action="store_true")
-    parser.add_argument("--actionlint", required=True)
+    parser.add_argument("--actionlint")
+    parser.add_argument("--native-regression-proofs", action="store_true")
     args = parser.parse_args()
     output = ROOT / "build/quality"
     output.mkdir(parents=True, exist_ok=True)
@@ -102,6 +109,14 @@ def main():
         owners = quality.check_evidence(paths, declarations, exists)
         version, _ = release.validate_source(ROOT, args.base)
         quality.check_changelog((ROOT / "CHANGELOG.md").read_text(), version)
+        if args.native_regression_proofs:
+            if sys.platform != "darwin":
+                raise quality.QualityError("Native proofs require macOS")
+            regression_proofs(declarations, base, output, native_only=True)
+            print("PASS: native regression proofs on the actual comparison base")
+            return 0
+        if not args.actionlint:
+            raise quality.QualityError("Workflow validator is required")
         # Explicit supplement for GitHub's queue property, which actionlint 1.7.12
         # predates. All other actionlint diagnostics remain blocking.
         import yaml
@@ -121,6 +136,8 @@ def main():
         selected_tests = {"tests/release_acceptance.py", "tests/quality_acceptance.py", "tests/quality_runner_acceptance.py"}
         deferred = {"tests/dmg_acceptance.py"}  # Required by the dependent package job.
         for declaration in declarations:
+            if any(path.startswith("Sources/") for path in declaration["tests"]):
+                continue  # These tests, including their Python support, execute in macOS lanes.
             for path in declaration["tests"]:
                 if path.startswith("Sources/") or path in deferred or path == "tests/workflow_acceptance.py":
                     continue  # Required by both native-regression jobs or package.

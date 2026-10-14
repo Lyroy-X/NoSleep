@@ -1,0 +1,15 @@
+[
+  {
+    "behavior": "Native regression proofs run in both macOS lanes and are explicitly deferred on Ubuntu, while packaging waits for the complete checks",
+    "mode": "new-capability",
+    "productionPaths": [
+      "scripts/check-quality.py",
+      "scripts/check-mutations.py",
+      ".github/workflows/regression.yml"
+    ],
+    "tests": [
+      "tests/quality_runner_acceptance.py",
+      "tests/workflow_acceptance.py"
+    ]
+  }
+]
