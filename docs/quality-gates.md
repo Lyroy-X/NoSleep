@@ -15,6 +15,7 @@ are retained in receipts/logs instead of claiming identical patch/toolchain buil
 python3 -m venv build/ci-python
 build/ci-python/bin/python -m pip install -r scripts/requirements-ci.txt
 build/ci-python/bin/python scripts/check-quality.py --base <base-sha> --worktree --actionlint /absolute/path/to/actionlint
+build/ci-python/bin/python scripts/check-quality.py --base <base-sha> --worktree --native-regression-proofs
 ./scripts/test.sh --local
 python3 -m pip install --target build/packaging-python -r scripts/requirements-dmg.txt
 ./scripts/package-dmg.sh
@@ -43,7 +44,7 @@ Declarations cannot authorize commands or external actions.
 
 For bug fixes, `regression` tests run in a disposable read-only archive of the
 base plus only the declared test files. Python must produce a unittest assertion
-failure rather than a missing import. Native Swift must compile first and then
+failure rather than a missing import. Native Swift proofs execute only in the macOS lanes and must compile first and then
 fail its self-test; compile failures do not qualify. Fixture-dependent tests must
 remain self-contained or declare changed test support as tests. New capabilities
 and preservation use green focused tests and coverage/mutation evidence; their

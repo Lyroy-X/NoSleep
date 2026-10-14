@@ -82,5 +82,33 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(list(output.iterdir()), [])
 
 
+    def test_native_proof_is_deferred_on_linux_before_any_build(self):
+        proof = {**self.proof, "tests": ["Sources/UITests.swift"]}
+        output = self.root / "deferred"; output.mkdir()
+        with patch.object(runner.sys, "platform", "linux"), patch.object(runner.subprocess, "check_output", side_effect=AssertionError("Native build requested on an unsupported lane")) as archive:
+            runner.regression_proofs([proof], "a" * 40, output)
+        archive.assert_not_called()
+        self.assertIn("DEFERRED", (output / "red-green-0.log").read_text())
+
+    def test_native_only_does_not_repeat_python_proofs(self):
+        output = self.root / "native-only"; output.mkdir()
+        with patch.object(runner.subprocess, "check_output", side_effect=AssertionError("Native build requested on an unsupported lane")) as archive:
+            runner.regression_proofs([self.proof], "a" * 40, output, native_only=True)
+        archive.assert_not_called()
+        self.assertEqual(list(output.iterdir()), [])
+
+    def test_native_proof_runs_build_and_observes_behavior_error_on_macos(self):
+        (self.root / "Sources").mkdir()
+        (self.root / "Sources/UITests.swift").write_text("// transplanted focused native test")
+        proof = {**self.proof, "tests": ["Sources/UITests.swift"]}
+        output = self.root / "native-proof"; output.mkdir()
+        with patch.object(runner, "ROOT", self.root), patch.object(runner.sys, "platform", "darwin"), \
+                patch.object(runner.subprocess, "check_output", return_value=self.archive), \
+                patch.object(runner, "run") as build, \
+                patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "ERROR: old incorrect behavior")):
+            runner.regression_proofs([proof], "a" * 40, output, native_only=True)
+        self.assertEqual(build.call_count, 1)
+        self.assertIn("ERROR: old incorrect behavior", (output / "red-green-0.log").read_text())
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

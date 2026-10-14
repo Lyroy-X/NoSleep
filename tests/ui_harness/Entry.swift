@@ -47,6 +47,7 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
         let snapshot = try Data(contentsOf: UIHarnessEnvironment.dataDirectory.appendingPathComponent("ui.json"))
         let fields = try JSONSerialization.jsonObject(with: snapshot) as! [String: Any]
         require(!fields.keys.contains { $0.lowercased().contains("vpn") || $0.lowercased().contains("recovery") || $0.lowercased().contains("observer") }, "UI snapshot contains only current app features")
+        try nativeTerminationAcceptance(owner, app)
         NSStatusBar.system.removeStatusItem(owner.item)
         owner.window.close()
         print("PASS: local native UI E2E; real power, installed app and network untouched")
