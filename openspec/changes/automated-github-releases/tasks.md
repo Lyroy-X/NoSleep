@@ -17,4 +17,6 @@
 - Keep the OpenSpec change active; archival was not requested.
 
 ## 4. Hosted CI follow-up
-- [ ] 4.1 Fix the ARM-only contract probe on Intel and verify both complete hosted native lanes and package acceptance for the final PR head.
+- [x] 4.1 Fix the ARM-only contract probe on Intel and verify both complete hosted native lanes and package acceptance for the final PR head.
+
+- [x] 4.2 Replace the 150-ms UI assumption with bounded state waiting and verify delayed/missing completion locally before the hosted follow-up release.

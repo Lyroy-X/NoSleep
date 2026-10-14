@@ -5,6 +5,13 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
     guard condition() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
     print("PASS: \(message)")
 }
+func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
+    let deadline = ProcessInfo.processInfo.systemUptime + timeout
+    while !ready() && ProcessInfo.processInfo.systemUptime < deadline {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+    return ready()
+}
 @main enum PrivateUIHarness {
     static func main() throws {
         let app = NSApplication.shared
@@ -27,11 +34,17 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
         require(!labels.contains { $0.contains("VPN") || $0.contains("Cisco") }, "native window has no VPN status or settings")
         require(owner.window.toolbar != nil && owner.window.minSize.width == 520, "toolbar, resizing and native layout preserved")
         func drain() {
-            let until = Date(timeIntervalSinceNow: 0.15)
-            while owner.busy && Date() < until { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01)) }
-            require(!owner.busy, "action completion leaves controls available")
+            require(waitForUI({ !owner.busy }), "action completion leaves controls available")
         }
-        owner.displaySwitch.performClick(nil); drain()
+        require(waitForUI({ true }, timeout: 0), "already completed UI needs no wait")
+        owner.engine.deferCompletion = true
+        owner.displaySwitch.performClick(nil)
+        require(owner.busy && !waitForUI({ !owner.busy }, timeout: 0.02), "missing completion fails within bounded wait")
+        let delayedAt = ProcessInfo.processInfo.systemUptime
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { owner.engine.completeForTesting() }
+        drain()
+        require(ProcessInfo.processInfo.systemUptime - delayedAt >= 0.25, "delayed completion beyond the old 150-ms deadline is observed")
+        owner.engine.deferCompletion = false
         require(owner.current.displayWanted && !owner.current.systemWanted, "display switch leaves sleep protection independent")
         let menu = app.mainMenu!.items.first { $0.title == "Управление" }!.submenu!
         let sleep = menu.item(withTag: 22)!

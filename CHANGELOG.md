@@ -1,5 +1,9 @@
 # NoSleep changes
 
+## [3.4.4]
+
+- Wait for actual isolated UI completion with a bounded monotonic deadline on loaded CI runners; verify delayed and missing completions.
+
 ## [3.4.3]
 
 - Build and publish a verified universal DMG after each update to main.
