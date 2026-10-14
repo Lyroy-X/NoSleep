@@ -13,7 +13,7 @@ ui=ui.replace(old,'UIHarnessEnvironment.dataDirectory').replace('UserDefaults.st
 (case/'UI.swift').write_text('import AppKit\n'+ui)
 bundle='local.NoSleep.UIFixture.'+uuid.uuid4().hex
 app=case/'Fixture.app';exe=app/'Contents/MacOS/Fixture';exe.parent.mkdir(parents=True)
-inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift']
+inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift',root/'Sources/NoSleepBrand.swift']
 (case/'Aggregate.swift').write_text('func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }\n');inputs.append(case/'Aggregate.swift')
 result=subprocess.run(['swiftc','-module-cache-path',str(root/'build/module-cache/ui-rollback'),*map(str,inputs),'-o',str(exe)],capture_output=True,text=True,timeout=90)
 (case/'compile.log').write_text(result.stdout+result.stderr)

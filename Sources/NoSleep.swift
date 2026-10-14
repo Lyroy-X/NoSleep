@@ -619,8 +619,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
             menu.item(withTag: 25)?.title = allButton.title; menu.item(withTag: 25)?.isEnabled = allButton.isEnabled
             menu.item(withTag: 27)?.isEnabled = !exporting
         }
-        let icon = NSImage(systemSymbolName: "cup.and.saucer.fill", accessibilityDescription: "NoSleep"); icon?.isTemplate = true
-        item.button?.image = icon; item.button?.title = current.statusTitle
+        item.button?.image = NoSleepBrand.menuIcon; item.button?.title = current.statusTitle
         item.button?.toolTip = "NoSleep · Сон: \(current.systemActual ? "запрещён" : "разрешён") · Экран: \(current.displayActual ? "не гаснет" : "обычный режим")"
         item.menu?.item(withTag: 2)?.state = sleepSwitch.state; item.menu?.item(withTag: 2)?.isEnabled = sleepSwitch.isEnabled
         item.menu?.item(withTag: 3)?.state = displaySwitch.state; item.menu?.item(withTag: 3)?.isEnabled = displaySwitch.isEnabled
@@ -705,6 +704,7 @@ do {
         try setupTests()
         try featureTests()
         try uiTests()
+        try brandTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
     } else if CommandLine.arguments.contains("--verify-setup-script") {
