@@ -1,0 +1,20 @@
+[
+  {
+    "behavior": "Exact-version universal release, complete CI dependency graph and retryable publication",
+    "mode": "new-capability",
+    "productionPaths": ["scripts/release.py", ".github/workflows/release.yml", ".github/workflows/regression.yml", "scripts/requirements-ci.txt"],
+    "tests": ["tests/release_acceptance.py", "tests/workflow_acceptance.py"]
+  },
+  {
+    "behavior": "Exact diff/test ownership, changed-code coverage and critical guard mutations",
+    "mode": "new-capability",
+    "productionPaths": ["scripts/quality.py", "scripts/check-quality.py", "scripts/check-mutations.py"],
+    "tests": ["tests/quality_acceptance.py", "tests/quality_runner_acceptance.py"]
+  },
+  {
+    "behavior": "Existing regression runner also executes the new release and quality tests",
+    "mode": "preservation",
+    "productionPaths": ["scripts/test.sh"],
+    "tests": ["tests/release_acceptance.py", "tests/quality_acceptance.py", "tests/dmg_acceptance.py"]
+  }
+]

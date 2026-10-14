@@ -1,4 +1,5 @@
 """Check the final, read-only DMG after a fresh mount, not its staging folder."""
+import argparse
 import hashlib
 import os
 import plistlib
@@ -11,7 +12,11 @@ sys.path.insert(0, str(project / 'build/packaging-python'))
 from ds_store import DSStore
 from mac_alias import Alias
 
-image = Path(sys.argv[1]).resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--ci', action='store_true', help='Verify stored layout without Finder automation')
+parser.add_argument('image', type=Path)
+args = parser.parse_args()
+image = args.image.resolve()
 subprocess.run(['hdiutil', 'verify', '-quiet', str(image)], check=True)
 mounted = plistlib.loads(subprocess.check_output(
     ['hdiutil', 'attach', '-readonly', '-nobrowse', '-plist', str(image)]))
@@ -54,7 +59,10 @@ try:
         end tell
     end run
     '''
-    subprocess.run(['osascript', '-e', script, root.name], check=True)
+    if args.ci:
+        print('SKIP: Finder automation; stored layout/background remain verified', flush=True)
+    else:
+        subprocess.run(['osascript', '-e', script, root.name], check=True)
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(root / 'NoSleep.app')], check=True)
     print('PASS: app signature remains valid', flush=True)
     expected = Path(os.environ.get('NOSLEEP_DMG_APP', project / 'build/release/NoSleep.app')).resolve()

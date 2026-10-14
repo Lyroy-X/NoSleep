@@ -1,0 +1,45 @@
+name: NoSleep release
+
+"on":
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nosleep-release-main
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  verify:
+    uses: ./.github/workflows/regression.yml
+    with:
+      base_sha: ${{ github.event.before }}
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same publisher and version
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download this run's verified package
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+      - name: Download verified package
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: nosleep-release-${{ github.sha }}
+          path: build/github-release
+      - name: Publish or resume the matching release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py publish --directory build/github-release --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"

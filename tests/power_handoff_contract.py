@@ -196,7 +196,7 @@ class OwnedHandoffRunnerContract(unittest.TestCase):
         cls.evidence = REPO / 'build/power-handoff-review' / ('runner-contract-' + uuid.uuid4().hex)
         cls.evidence.mkdir(mode=0o700, parents=True)
         cls.probe = cls.evidence / 'probe'
-        result = subprocess.run(['swiftc', '-target', 'arm64-apple-macos14.0', '-parse-as-library',
+        result = subprocess.run(['swiftc', '-target', platform.machine() + '-apple-macos14.0', '-parse-as-library',
                      str(REPO/'infra/power-handoff/owned_vm_probe.swift'), '-o', str(cls.probe)], capture_output=True, timeout=60)
         if result.returncode:
             (cls.evidence/'compile.log').write_bytes(result.stdout + result.stderr)
@@ -405,6 +405,11 @@ class OwnedHandoffRunnerContract(unittest.TestCase):
         result=self.guest.HandoffRunner(bindings,self.config(),lambda value:None).execute()
         self.assertFalse(result['fullHandoffProven']);self.assertTrue(result['restorationDeferred'])
         self.assertEqual(result['phase'],'failed-app-identity-unconfirmed');self.assertEqual(bindings.signals,[])
+
+    def test_read_only_probe_matches_native_runner_architecture(self):
+        result = subprocess.run(['/usr/bin/lipo', '-archs', str(self.probe)],
+                                capture_output=True, text=True, check=True, timeout=5)
+        self.assertEqual(result.stdout.split(), [platform.machine()])
 
     def test_read_only_probe_self_test_has_no_real_runtime_access(self):
         result=subprocess.run([str(self.probe),'--self-test'],capture_output=True,timeout=5)
