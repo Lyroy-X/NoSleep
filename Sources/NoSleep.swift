@@ -516,7 +516,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         window.toolbar = toolbar; window.toolbarStyle = .unifiedCompact
         window.setContentSize(NSSize(width: 440, height: 430))
         window.setFrameAutosaveName("NoSleep.MainWindow"); if !window.setFrameUsingName("NoSleep.MainWindow") { window.center() }
-        let scroll = NSScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        let scroll = FittingScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
         scroll.drawsBackground = true; scroll.backgroundColor = .windowBackgroundColor
         let document = FlippedContentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
@@ -524,8 +524,9 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor),
                                      scroll.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
                                      scroll.topAnchor.constraint(equalTo: window.contentView!.topAnchor),
-                                     scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor),
-                                     document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)])
+                                     scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor)])
+        scroll.documentWidth = document.widthAnchor.constraint(equalToConstant: 440)
+        scroll.documentWidth?.isActive = true
         let body = NSStackView(); body.orientation = .vertical; body.alignment = .leading; body.spacing = 16
         body.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(body)
         NSLayoutConstraint.activate([body.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 20),
@@ -722,6 +723,21 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
 }
 
 final class FlippedContentView: NSView { override var isFlipped: Bool { true } }
+
+final class FittingScrollView: NSScrollView {
+    var documentWidth: NSLayoutConstraint?
+    override func tile() {
+        super.tile()
+        // NSScrollView tiles legacy scrollers by changing its clip frame directly.
+        // A clip-view width anchor can retain the previous autoresizing width.
+        if let width = documentWidth, width.constant != contentView.bounds.width {
+            width.constant = contentView.bounds.width
+        }
+        if let document = documentView, document.frame.width != contentView.bounds.width {
+            document.setFrameSize(NSSize(width: contentView.bounds.width, height: document.frame.height))
+        }
+    }
+}
 
 @main enum NoSleepMain {
 static func main() {

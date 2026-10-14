@@ -45,6 +45,9 @@ func nativeCombinedShortcutTest() throws {
 #if NOSLEEP_UI_FIXTURE
 
 func compactNativeAcceptance(_ owner: MenuApp) throws {
+    let emptyScroll = FittingScrollView(frame: NSRect(x: 0, y: 0, width: 440, height: 430))
+    emptyScroll.tile()
+    require(emptyScroll.documentView == nil, "native tiling before document attachment remains safe")
     owner.permissionReady = true; owner.render()
     owner.engine.deferCompletion = true
     owner.allButton.performClick(nil)
@@ -69,11 +72,19 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
     require(!owner.busy && owner.current.systemWanted && owner.current.displayWanted, "keyboard combined action confirms both fake protections")
 
     func layoutCheck(_ name: String) throws {
-        owner.window.contentView!.layoutSubtreeIfNeeded()
-        owner.window.displayIfNeeded()
         let scroll = walk(owner.window.contentView!).compactMap { $0 as? NSScrollView }.first!
         let document = scroll.documentView!
-        require(abs(document.bounds.width - scroll.contentView.bounds.width) < 1, "\(name): document fits viewport width")
+        let settled = waitForUI({
+            owner.window.contentView!.layoutSubtreeIfNeeded()
+            scroll.tile()
+            owner.window.contentView!.layoutSubtreeIfNeeded()
+            owner.window.displayIfNeeded()
+            return abs(document.bounds.width - scroll.contentView.bounds.width) < 1
+        })
+        require(settled, "\(name): document fits viewport width within bounded native layout wait")
+        let stable = document.frame
+        scroll.tile()
+        require(document.frame == stable, "\(name): repeated native tiling is idempotent")
         for view in walk(document) where !view.isHiddenOrHasHiddenAncestor && (view is NSTextField || view is NSControl) {
             let frame = document.convert(view.bounds, from: view)
             require(frame.minX >= -1 && frame.maxX <= document.bounds.width + 1, "\(name): \(type(of: view)) remains within document width")
@@ -95,8 +106,11 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
         }
         try pixels!.write(to: UIHarnessEnvironment.output.appendingPathComponent(name + ".png"))
     }
+    let fixtureScroll = walk(owner.window.contentView!).compactMap { $0 as? NSScrollView }.first!
+    for scrollerStyle in [NSScroller.Style.overlay, .legacy] {
+    fixtureScroll.scrollerStyle = scrollerStyle
     for appearance in [NSAppearance.Name.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua] {
-        let name = appearance.rawValue
+        let name = appearance.rawValue + (scrollerStyle == .legacy ? "-legacy" : "-overlay")
         owner.window.appearance = NSAppearance(named: appearance)
         owner.permissionReady = true
         owner.current = LiveState(systemWanted: true, systemActual: true, displayWanted: false, displayActual: false, error: nil)
@@ -111,6 +125,7 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
         owner.setupError = nil; owner.permissionReady = true
         owner.current = LiveState(systemWanted: true, systemActual: true, displayWanted: false, displayActual: false, error: nil); owner.render()
         require(owner.errorLabel.isHidden && owner.summaryLabel.stringValue == "Mac под защитой", "successful retry clears error presentation")
+    }
     }
     let stateFile = UIHarnessEnvironment.dataDirectory.appendingPathComponent("ui.json")
     let before = try FileManager.default.attributesOfItem(atPath: stateFile.path)[.modificationDate] as! Date
