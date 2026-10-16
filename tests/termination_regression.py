@@ -17,10 +17,14 @@ class TerminationRegressionTests(unittest.TestCase):
             case = Path(temporary)
             source = (ROOT / "Sources/NoSleep.swift").read_text()
             if mutate:
-                anchor = "if let request = SystemTerminationRequest(event: event), !confirm(request) { return .terminateCancel }"
-                if anchor not in source:
+                anchors = [
+                    ("if let request = SystemTerminationRequest(event: event), !confirm(request) { handlingTermination = false; return .terminateCancel }", "if false { handlingTermination = false; return .terminateCancel }"),
+                    ("if let request = SystemTerminationRequest(event: event), !confirm(request) { return .terminateCancel }", "if false { return .terminateCancel }"),
+                ]
+                selected = next(((old, new) for old, new in anchors if old in source), None)
+                if selected is None:
                     self.skipTest("base revision predates the confirmation guard")
-                source = source.replace(anchor, "if false { return .terminateCancel }", 1)
+                source = source.replace(*selected, 1)
             ui = source[source.index("final class MenuApp:"):source.index("@main enum NoSleepMain")]
             old = 'FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NoSleep")'
             if ui.count(old) != 1:
@@ -28,7 +32,14 @@ class TerminationRegressionTests(unittest.TestCase):
             ui = ui.replace(old, "UIHarnessEnvironment.dataDirectory").replace("UserDefaults.standard", "UIHarnessEnvironment.defaults")
             (case / "UI.swift").write_text("import AppKit\n" + ui)
             (case / "Stubs.swift").write_text(STUBS)
-            (case / "Driver.swift").write_text(DRIVER)
+            driver = DRIVER
+            has_lock = (ROOT / "Sources/AutomaticLock.swift").exists()
+            if has_lock:
+                driver = driver.replace("let owner = MenuApp(); owner.buildWindow()",
+                    "let owner = MenuApp(); owner.lockController = AutomaticLockController(backend: TestScreenLockBackend(try ScreenLockPolicy(0)), store: TestScreenLockStore()); owner.buildWindow()")
+                driver = driver.replace("        let handler = QuitHandler(owner)",
+                    '        owner.startAutomaticLock()\n        let readinessDeadline = Date(timeIntervalSinceNow: 3)\n        while !owner.lockController.state.ready && Date() < readinessDeadline { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01)) }\n        guard owner.lockController.state.ready else { fputs("ERROR: isolated lock fixture not ready\\n", stderr); exit(2) }\n        let handler = QuitHandler(owner)')
+            (case / "Driver.swift").write_text(driver)
             (case / "Aggregate.swift").write_text('func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }\n')
             inputs = [case / "UI.swift", case / "Stubs.swift", case / "Driver.swift", case / "Aggregate.swift", ROOT / "Sources/ApplicationMenu.swift", ROOT / "Sources/NoSleepBrand.swift"]
             # No new API is referenced by the driver. The old revision compiles without this module.
@@ -36,6 +47,8 @@ class TerminationRegressionTests(unittest.TestCase):
                 inputs.append(ROOT / "Sources/Termination.swift")
             if (ROOT / "Sources/PowerPresentation.swift").exists():
                 inputs.append(ROOT / "Sources/PowerPresentation.swift")
+            if has_lock:
+                inputs.extend([ROOT / "Sources/AutomaticLock.swift", ROOT / "Sources/AutomaticLockTests.swift"])
             executable = case / "Fixture"
             compile_result = subprocess.run(["swiftc", "-module-cache-path", str(ROOT / "build/module-cache/termination-regression"), *map(str, inputs), "-o", str(executable)], capture_output=True, text=True, timeout=90)
             if compile_result.returncode:

@@ -17,6 +17,10 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let owner = MenuApp()
+        let lockBackend = TestScreenLockBackend(try ScreenLockPolicy(120))
+        let lockStore = TestScreenLockStore()
+        owner.lockController = AutomaticLockController(backend: lockBackend, store: lockStore)
+        owner.lockPasswordPrompt = { _, done in done(try! ScreenLockSecret("fixture-only")) }
         owner.buildWindow()
         owner.window.orderFront(nil)
         owner.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -28,14 +32,16 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         owner.engine.changed = { owner.current = $0 }
         try FileManager.default.createDirectory(at: UIHarnessEnvironment.dataDirectory, withIntermediateDirectories: true)
         owner.render()
+        owner.startAutomaticLock()
+        spinUntil { owner.lockController.state.ready }
         try uiTests(runTerminationRegression: false)
         try presentationTests()
         let controls = walk(owner.window.contentView!).compactMap { $0 as? NSSwitch }
-        require(controls.count == 2, "only independent sleep and display switches remain")
+        require(controls.count == 3, "independent sleep, display and automatic lock switches")
         let labels = walk(owner.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
         require(!labels.contains { $0.contains("VPN") || $0.contains("Cisco") }, "native window has no VPN status or settings")
         require(owner.window.toolbar != nil && owner.window.contentMinSize == NSSize(width: 440, height: 360), "compact minimum content size and native resizing preserved")
-        require(owner.window.contentView!.bounds.size == NSSize(width: 440, height: 430), "fresh window has selected 440x430 content size")
+        require(owner.window.contentView!.bounds.size == NSSize(width: 440, height: 560), "fresh window has selected 440x560 content size")
         func drain() {
             require(waitForUI({ !owner.busy }), "action completion leaves controls available")
         }
@@ -56,16 +62,19 @@ func waitForUI(_ ready: () -> Bool, timeout: TimeInterval = 3) -> Bool {
         drain()
         require(owner.current.systemWanted && owner.current.displayWanted, "sleep menu enables protection without changing display")
         owner.allButton.performClick(nil); drain()
-        require(!owner.current.systemWanted && !owner.current.displayWanted && owner.allButton.title == "Включить всё", "combined action disables exactly the two power features")
+        require(!owner.current.systemWanted && !owner.current.displayWanted && !owner.lockController.state.enabled && owner.allButton.title == "Включить всё", "combined action disables all three features")
         owner.allButton.performClick(nil); drain()
-        require(owner.current.systemWanted && owner.current.displayWanted && owner.allButton.title == "Выключить всё", "combined action enables both power features")
+        require(owner.current.systemWanted && owner.current.displayWanted && owner.lockController.state.enabled && owner.allButton.title == "Выключить всё", "combined action enables all three features")
+        owner.perform("all-off"); drain()
         owner.permissionReady = false; owner.render()
         require(!owner.sleepSwitch.isEnabled && owner.displaySwitch.isEnabled && !owner.setupRow.isHidden, "first-run permission state preserves display control and setup")
         try compactNativeAcceptance(owner)
+        owner.perform("all-off"); drain()
         let snapshot = try Data(contentsOf: UIHarnessEnvironment.dataDirectory.appendingPathComponent("ui.json"))
         let fields = try JSONSerialization.jsonObject(with: snapshot) as! [String: Any]
         require(!fields.keys.contains { $0.lowercased().contains("vpn") || $0.lowercased().contains("recovery") || $0.lowercased().contains("observer") }, "UI snapshot contains only current app features")
         try nativeTerminationAcceptance(owner, app)
+        try automaticLockUIAcceptance(owner, app, lockBackend, lockStore)
         NSStatusBar.system.removeStatusItem(owner.item)
         owner.window.close()
         print("PASS: local native UI E2E; real power, installed app and network untouched")

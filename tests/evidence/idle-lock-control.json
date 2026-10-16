@@ -1,0 +1,19 @@
+[
+  {
+    "behavior": "Independent automatic-lock control preserves original policy, serializes native authentication and restores before quit while retaining the compact interface",
+    "mode": "new-capability",
+    "productionPaths": [
+      "Sources/AutomaticLock.swift",
+      "Sources/NoSleep.swift",
+      "Sources/ApplicationMenu.swift",
+      "scripts/test.sh"
+    ],
+    "tests": [
+      "Sources/AutomaticLockTests.swift",
+      "Sources/UITests.swift",
+      "tests/automatic_lock_acceptance.py",
+      "tests/ui_acceptance.py",
+      "tests/termination_regression.py"
+    ]
+  }
+]

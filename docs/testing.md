@@ -43,3 +43,18 @@ UI-ветка запускает в CI и локально `./scripts/test.sh --
 Самостоятельный мост `infra/power-handoff/bridge.swift` и его пять изолированных проверок сохранены; [границы проверки моста](power-handoff.md). Удалены только старые VM-операторы, зависящие от лаборатории.
 
 Нативный self-test выполняет компилируемый old/new proof и критическую мутацию один раз; UI fixture проверяет меню без повторной компиляции, затем выполняет собственные настоящие диалоги и клавиши. Лимит UI остаётся 30 секунд.
+
+## Automatic lock (3.6.0)
+
+`tests/automatic_lock_acceptance.py` compiles native normal/refusal/boundary/retry
+contracts and five isolated critical mutants. `tests/ui_acceptance.py` executes
+the current compact UI with fake policy/power/store, including secure prompt,
+cancellation, concurrency, combined actions, recovery and deferred termination.
+No automated app test changes real host policy or an installed app.
+
+Real macOS27 before/off/restored, manual-lock preservation and independent
+controller-crash cleanup passed in the retained local fixture. Exact setup,
+receipts, safety constraints and limits are in [test-vm.md](test-vm.md). Those
+receipts validate the system route; the ported compact UI requires fresh local
+and remote regression. Universal packaging does not prove Intel execution;
+Intel CI remains disabled by the existing repository decision.

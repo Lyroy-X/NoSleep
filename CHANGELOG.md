@@ -1,5 +1,15 @@
 # NoSleep changes
 
+## [3.6.0]
+
+- Add independent automatic-lock control inside the compact native UI, with a secure password prompt for each required policy change.
+- Save the original system delay before changing it and restore it on disable and normal quit; cancellation/refusal preserves confirmed state and remains retryable.
+- Keep interrupted-run recovery, combined-action serialization and existing shutdown/restart confirmation. Passwords are not saved.
+- Document the retained, stopped local macOS 27 ASIF fixture, resource limits, reuse rules and real idle/manual-lock/controller-crash evidence without committing its disk or raw state.
+- Add focused native outcome tests and five assertion-based safety mutations. Version 3.6.0 is a compatible new capability; build 19 exceeds main build 18.
+
+Local VM acceptance proves ordinary wake without a password and manual-lock preservation. Continuous Computer-plugin operation while the display remains asleep, Intel runtime, host lid/shutdown, first admin setup and downloaded-app Gatekeeper need separate acceptance.
+
 ## [3.5.1]
 
 - Remove the retired VPN laboratory and its dependent VM handoff runner, retaining the standalone power bridge and its isolated contracts.
