@@ -414,6 +414,9 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     var window: NSWindow!
     var sleepSwitch: NSSwitch!
     var displaySwitch: NSSwitch!
+    var lockSwitch: NSSwitch!
+    var lockState: NSTextField!
+    var restoreLockButton: NSButton!
     var sleepState: NSTextField!
     var displayState: NSTextField!
     var errorLabel: NSTextField!
@@ -429,6 +432,10 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     var observer: NSObjectProtocol?
     let dataDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("NoSleep")
     lazy var diagnostics = DiagnosticStore(root: dataDir)
+    lazy var lockController = AutomaticLockController(backend: SystemScreenLockBackend(),
+        store: FileScreenLockRestoreStore(directory: dataDir.appendingPathComponent("AutomaticLock")))
+    var lockPasswordPrompt: ((ScreenLockPlan, @escaping (ScreenLockSecret?) -> Void) -> Void)?
+    var terminationCompletion: ((Bool) -> Void)?
     var lastUIData = Data()
     var allButton: NSButton!
     var exportButton: NSButton!
@@ -438,8 +445,10 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
 
     func writeUI() {
         let state: [String: Any] = ["windowVisible": window.isVisible, "windowTitle": window.title,
-                                  "statusTitle": current.statusTitle,
+                                  "statusTitle": item?.button?.title ?? current.statusTitle,
                                   "sleepChecked": sleepSwitch.state == .on, "displayChecked": displaySwitch.state == .on,
+                                  "lockChecked": lockSwitch.state == .on, "lockEnabled": lockSwitch.isEnabled,
+                                  "lockText": lockState.stringValue,
                                   "errorText": errorLabel.stringValue,
                                   "setupVisible": !setupRow.isHidden, "sleepEnabled": sleepSwitch.isEnabled,
                                   "setupText": setupLabel.stringValue, "setupButtonTitle": setupButton.title,
@@ -501,12 +510,12 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         return box
     }
     func buildWindow() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 430), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 560), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "NoSleep"; window.contentMinSize = NSSize(width: 440, height: 360)
         window.delegate = self; window.isReleasedWhenClosed = false
         allButton = NSButton(title: "Выключить всё", target: self, action: #selector(toggleAll)); allButton.bezelStyle = .rounded
         allButton.setAccessibilityLabel("Включить или выключить все функции NoSleep")
-        allButton.toolTip = "Включить или выключить обе защиты · ⇧⌘A"
+        allButton.toolTip = "Включить или выключить все функции · ⇧⌘A"
         allButton.heightAnchor.constraint(equalToConstant: 28).isActive = true; allButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 135).isActive = true
         exportButton = NSButton(title: "Отчёт…", target: self, action: #selector(exportDiagnostics)); exportButton.bezelStyle = .rounded
         exportButton.toolTip = "Сохранить диагностику без паролей"
@@ -515,7 +524,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         let toolbar = NSToolbar(identifier: "NoSleep.Toolbar"); toolbar.delegate = self
         toolbar.displayMode = .iconOnly; toolbar.allowsUserCustomization = false
         window.toolbar = toolbar; window.toolbarStyle = .unifiedCompact
-        window.setContentSize(NSSize(width: 440, height: 430))
+        window.setContentSize(NSSize(width: 440, height: 560))
         window.setFrameAutosaveName("NoSleep.MainWindow"); if !window.setFrameUsingName("NoSleep.MainWindow") { window.center() }
         let scroll = FittingScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true
@@ -549,10 +558,20 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         setupLabel.widthAnchor.constraint(equalTo: setupRow.widthAnchor).isActive = true
         sleepSwitch = switchControl("Mac не засыпает", action: #selector(toggleSleep))
         displaySwitch = switchControl("Экран не гаснет", action: #selector(toggleDisplay))
+        lockSwitch = switchControl("Не блокировать автоматически", action: #selector(toggleLock))
+        lockState = uiLabel("Проверяю настройку автоблокировки…", secondary: true)
+        let lockHelp = NSButton(title: "", target: self, action: #selector(showLockHelp)); lockHelp.bezelStyle = .helpButton
+        lockHelp.setAccessibilityLabel("О сне, экране и блокировке")
+        let lockControls = NSStackView(views: [lockHelp, lockSwitch]); lockControls.spacing = 8
+        lockControls.distribution = .fill
+        lockControls.widthAnchor.constraint(equalToConstant: 94).isActive = true
         sleepState = uiLabel("Проверяю…", secondary: true); displayState = uiLabel("Проверяю…", secondary: true)
         let power = card([row("Mac не засыпает", detail: sleepState, symbol: "laptopcomputer", control: sleepSwitch), separator(),
-                          row("Экран не гаснет", detail: displayState, symbol: "display", control: displaySwitch)])
+                          row("Экран не гаснет", detail: displayState, symbol: "display", control: displaySwitch), separator(),
+                          row("Не блокировать автоматически", detail: lockState, symbol: "lock.open", control: lockControls)])
         body.addArrangedSubview(power)
+        restoreLockButton = NSButton(title: "Восстановить исходную блокировку…", target: self, action: #selector(restoreAutomaticLock))
+        restoreLockButton.bezelStyle = .rounded; restoreLockButton.isHidden = true; body.addArrangedSubview(restoreLockButton)
         let actions = NSStackView(views: [allButton, NSView()]); actions.orientation = .horizontal; actions.alignment = .centerY
         body.addArrangedSubview(actions)
         errorLabel = uiLabel(""); errorLabel.textColor = .systemRed; errorLabel.isHidden = true; body.addArrangedSubview(errorLabel)
@@ -580,10 +599,12 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         menu.addItem(NSMenuItem(title: "Открыть NoSleep", action: #selector(showWindow), keyEquivalent: "")); menu.addItem(.separator())
         let sleepMenu = NSMenuItem(title: "Mac не засыпает", action: #selector(toggleSleep), keyEquivalent: ""); sleepMenu.tag = 2; menu.addItem(sleepMenu)
         let displayMenu = NSMenuItem(title: "Экран не гаснет", action: #selector(toggleDisplay), keyEquivalent: ""); displayMenu.tag = 3; menu.addItem(displayMenu)
+        let lockMenu = NSMenuItem(title: "Не блокировать автоматически", action: #selector(toggleLock), keyEquivalent: ""); lockMenu.tag = 4; menu.addItem(lockMenu)
         let allMenu = NSMenuItem(title: "Выключить всё", action: #selector(toggleAll), keyEquivalent: ""); allMenu.tag = 5; menu.addItem(allMenu)
         menu.addItem(NSMenuItem(title: "Сохранить диагностику…", action: #selector(exportDiagnostics), keyEquivalent: "")); menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Выйти", action: #selector(quitApp), keyEquivalent: "q"))
         for entry in menu.items { entry.target = self }; item.menu = menu
+        startAutomaticLock()
         engine.changed = { [weak self] state in
             guard let self = self else { return }; self.writeState(state)
             let lostPermission = state.error != nil && (self.engine.protection.power as? MacPower)?.canControlSleep() == false
@@ -601,7 +622,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
                 }
             } else if command == "export-test" { self.saveDiagnostics(to: self.dataDir.appendingPathComponent("last-support-test.zip")) }
             else if command == "toggle-all" { self.toggleAll() }
-            else if ["sleep-on", "sleep-off", "display-on", "display-off", "all-off", "all-on"].contains(command) { self.perform(command) }
+            else if ["sleep-on", "sleep-off", "display-on", "display-off", "all-off", "all-on", "lock-on", "lock-off"].contains(command) { self.perform(command) }
         }
         let wantedSystem = UserDefaults.standard.object(forKey: "PreventSystemSleep") == nil || UserDefaults.standard.bool(forKey: "PreventSystemSleep")
         let wantedDisplay = UserDefaults.standard.bool(forKey: "KeepDisplayAwake")
@@ -627,11 +648,31 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         summaryLabel.stringValue = summary.title; summaryDetail.stringValue = summary.detail
         summaryIcon.image = NSImage(systemSymbolName: summary.symbol, accessibilityDescription: nil)
         summaryIcon.contentTintColor = summary.tone == .attention ? .systemOrange : summary.tone == .active ? .controlAccentColor : .secondaryLabelColor
-        allButton.title = aggregateTitle(system: current.systemWanted, display: current.displayWanted)
+        allButton.title = aggregateTitle(system: current.systemWanted || lockController.state.enabled || lockController.requiresRestoration, display: current.displayWanted)
         allButton.isEnabled = !busy
         item.menu?.item(withTag: 5)?.title = allButton.title; item.menu?.item(withTag: 5)?.isEnabled = allButton.isEnabled
         sleepSwitch.state = current.systemWanted ? .on : .off; displaySwitch.state = current.displayWanted ? .on : .off
         sleepSwitch.isEnabled = !busy && permissionReady == true; displaySwitch.isEnabled = !busy
+        let lock = lockController.state
+        if lock.issue != nil || lock.recovery {
+            summaryLabel.stringValue = "Проверьте автоблокировку"
+            summaryDetail.stringValue = lock.issue?.localizedDescription ?? "Доступно восстановление исходной настройки."
+            summaryIcon.image = NSImage(systemSymbolName: "lock.trianglebadge.exclamationmark", accessibilityDescription: nil)
+            summaryIcon.contentTintColor = .systemOrange
+        } else if lock.enabled && !current.systemWanted && !current.displayWanted && permissionReady == true && !busy && setupError == nil && current.error == nil {
+            summaryLabel.stringValue = "Автоблокировка отключена"
+            summaryDetail.stringValue = "Сон и экран — по настройкам macOS."
+            summaryIcon.image = NSImage(systemSymbolName: "lock.open", accessibilityDescription: nil)
+            summaryIcon.contentTintColor = .controlAccentColor
+        }
+        lockSwitch.state = lock.enabled ? .on : .off
+        lockSwitch.isEnabled = !busy && lock.ready
+        restoreLockButton.isHidden = !lockController.requiresRestoration
+        restoreLockButton.isEnabled = !busy
+        lockState.stringValue = lock.issue?.localizedDescription ?? (lock.recovery ? "Исходная настройка сохранена. Доступно восстановление." :
+            lock.enabled ? "Автоблокировка отключена. Ручная блокировка доступна." :
+            lock.policy.map { "Блокировка macOS: \($0.description)" } ?? "Проверяю настройку автоблокировки…")
+        lockState.textColor = lock.issue == nil ? .secondaryLabelColor : .systemRed
         setupRow.isHidden = permissionReady == true; setupLabel.isHidden = setupRow.isHidden; setupButton.isHidden = setupRow.isHidden
         setupButton.isEnabled = permissionReady == false && !busy
         setupLabel.stringValue = permissionReady == nil ? "Проверяю готовность NoSleep…" : "Один раз разрешите NoSleep управлять защитой сна. Подтверждение macOS запрашивается только при настройке."
@@ -643,25 +684,75 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         errorLabel.isHidden = errorLabel.stringValue.isEmpty
         exportButton.isEnabled = !exporting
         if let menu = NSApplication.shared.mainMenu?.items.first(where: { $0.title == "Управление" })?.submenu {
-            for (tag, control) in [(22, sleepSwitch!), (23, displaySwitch!)] {
+            for (tag, control) in [(22, sleepSwitch!), (23, displaySwitch!), (24, lockSwitch!)] {
                 menu.item(withTag: tag)?.state = control.state; menu.item(withTag: tag)?.isEnabled = control.isEnabled
             }
             menu.item(withTag: 25)?.title = allButton.title; menu.item(withTag: 25)?.isEnabled = allButton.isEnabled
             menu.item(withTag: 27)?.isEnabled = !exporting
         }
-        item.button?.image = NoSleepBrand.menuIcon; item.button?.title = current.statusTitle
-        item.button?.toolTip = "NoSleep · Сон: \(current.systemActual ? "запрещён" : "разрешён") · Экран: \(current.displayActual ? "не гаснет" : "обычный режим")"
+        item.button?.image = NoSleepBrand.menuIcon
+        item.button?.title = lock.issue != nil || lock.recovery ? " !" : lock.enabled && current.statusTitle == " OFF" ? " Блокировка" : current.statusTitle
+        item.button?.toolTip = "NoSleep · Сон: \(current.systemActual ? "запрещён" : "разрешён") · Экран: \(current.displayActual ? "не гаснет" : "обычный режим") · Автоблокировка: \(lock.enabled ? "отключена" : "по настройке macOS")"
         item.menu?.item(withTag: 2)?.state = sleepSwitch.state; item.menu?.item(withTag: 2)?.isEnabled = sleepSwitch.isEnabled
         item.menu?.item(withTag: 3)?.state = displaySwitch.state; item.menu?.item(withTag: 3)?.isEnabled = displaySwitch.isEnabled
+        item.menu?.item(withTag: 4)?.state = lockSwitch.state; item.menu?.item(withTag: 4)?.isEnabled = lockSwitch.isEnabled
         writeUI()
     }
     func perform(_ command: String) {
-        guard !busy else { return }
+        guard !busy, !handlingTermination else { return }
+        guard ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off", "lock-on", "lock-off"].contains(command) else { return }
+        if command.hasPrefix("lock-") || command.hasPrefix("all-") {
+            busy = true; render()
+            changeAutomaticLock(enabled: command.hasSuffix("-on")) { [weak self] success in
+                guard let self else { return }
+                if success && command.hasPrefix("all-") { self.performPower(command) }
+                else { self.busy = false; self.render() }
+            }
+            return
+        }
+        busy = true; performPower(command)
+    }
+    func performPower(_ command: String) {
         diagnostics.record(.powerAction, DiagnosticFacts(number: ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off"].firstIndex(of: command)))
-        busy = true; render(); engine.act(command) { [weak self] in DispatchQueue.main.async { self?.busy = false; self?.render() } }
+        render(); engine.act(command) { [weak self] in DispatchQueue.main.async { self?.busy = false; self?.render() } }
+    }
+    func startAutomaticLock() {
+        lockController.changed = { [weak self] _ in self?.render() }
+        lockController.load()
+    }
+    func automaticLockPasswordAlert(_ plan: ScreenLockPlan) -> (NSAlert, NSSecureTextField) {
+        let alert = NSAlert(); alert.messageText = plan.enabled ? "Отключить автоблокировку?" : "Восстановить автоблокировку?"
+        alert.informativeText = "NoSleep изменит системную настройку: \(plan.target?.description ?? "исходное значение"). Введите пароль текущего пользователя Mac. Пароль не сохраняется. При следующем изменении macOS запросит его снова."
+        alert.addButton(withTitle: "Продолжить"); alert.addButton(withTitle: "Отмена")
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.placeholderString = "Пароль пользователя Mac"; field.setAccessibilityLabel("Пароль пользователя Mac")
+        alert.accessoryView = field; alert.window.initialFirstResponder = field
+        return (alert, field)
+    }
+    func changeAutomaticLock(enabled: Bool, completion: @escaping (Bool) -> Void) {
+        lockController.prepare(enabled: enabled) { [weak self] result in
+            guard let self else { return }
+            guard case let .success(plan) = result else { completion(false); return }
+            let apply: (ScreenLockSecret?) -> Void = { [weak self] secret in
+                guard let self else { secret?.erase(); return }
+                if plan.needsPassword && secret == nil {
+                    self.lockController.cancel(plan) { completion(false) }
+                } else { self.lockController.apply(plan, secret: secret, completion: completion) }
+            }
+            if !plan.needsPassword { apply(nil) }
+            else if let prompt = self.lockPasswordPrompt { prompt(plan, apply) }
+            else {
+                let (alert, field) = self.automaticLockPasswordAlert(plan)
+                self.showWindow()
+                alert.beginSheetModal(for: self.window) { response in
+                    let secret = response == .alertFirstButtonReturn ? try? ScreenLockSecret(field.stringValue) : nil
+                    field.stringValue = ""; apply(secret)
+                }
+            }
+        }
     }
     @objc func setupPower() {
-        guard !busy else { return }; setupError = nil; busy = true; render()
+        guard !busy, !handlingTermination else { return }; setupError = nil; busy = true; render()
         do {
             let power = engine.protection.power as! MacPower
             if !power.canControlSleep() {
@@ -685,10 +776,17 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     }
     @objc func toggleSleep() { perform(current.systemWanted ? "sleep-off" : "sleep-on") }
     @objc func toggleDisplay() { perform(current.displayWanted ? "display-off" : "display-on") }
-    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted ? "all-off" : "all-on") }
+    @objc func toggleLock() { perform(lockController.state.enabled ? "lock-off" : "lock-on") }
+    @objc func restoreAutomaticLock() { perform("lock-off") }
+    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted || lockController.requiresRestoration ? "all-off" : "all-on") }
+    @objc func showLockHelp() {
+        let alert = NSAlert(); alert.messageText = "Сон, экран и блокировка"
+        alert.informativeText = "Сон компьютера, выключение дисплея и блокировка сеанса — три независимые функции. Можно запретить сон, разрешить экрану гаснуть и отдельно отключить автоблокировку. Блокировка может остановить управление интерфейсом нейронкой. Ручная блокировка остаётся доступна.\n\nГалочка изменяет системную настройку. NoSleep сохраняет исходную задержку и восстанавливает её при выключении галочки и обычном выходе с подтверждением паролем. После аварийного завершения настройка может остаться изменённой; при следующем запуске будет доступно восстановление."
+        alert.beginSheetModal(for: window)
+    }
     @objc func showHelp() {
         let alert = NSAlert(); alert.messageText = "Как работает NoSleep"
-        alert.informativeText = "Защита сна и экрана включаются независимо. Отчёт сохраняется вручную и не содержит секретов. Закрытие окна оставляет NoSleep работать в фоне."
+        alert.informativeText = "Сон, экран и автоблокировка управляются независимо. Для изменения автоблокировки нужен пароль текущего пользователя Mac; пароль не сохраняется. Отчёт сохраняется вручную и не содержит секретов. Закрытие окна оставляет NoSleep работать в фоне."
         alert.beginSheetModal(for: window)
     }
     @objc func exportDiagnostics() {
@@ -716,7 +814,8 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     @objc func quitApp() { NSApplication.shared.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        terminationReply(for: NSAppleEventManager.shared().currentAppleEvent) { request in
+        terminationCompletion = { sender.reply(toApplicationShouldTerminate: $0) }
+        return terminationReply(for: NSAppleEventManager.shared().currentAppleEvent) { request in
             sender.activate(ignoringOtherApps: true)
             return runSystemTerminationConfirmation(request.confirmationAlert())
         }
@@ -725,8 +824,22 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         // runModal processes UI events: another quit must not bypass the pending decision.
         guard !handlingTermination else { return .terminateCancel }
         handlingTermination = true
+        if let request = SystemTerminationRequest(event: event), !confirm(request) { handlingTermination = false; return .terminateCancel }
+        guard !busy else { handlingTermination = false; return .terminateCancel }
+        if !lockController.state.ready || lockController.requiresRestoration {
+            busy = true; render()
+            changeAutomaticLock(enabled: false) { [weak self] success in
+                guard let self else { return }
+                let allowed = success && self.finishTermination() == .terminateNow
+                self.busy = false; self.handlingTermination = false; self.render()
+                self.terminationCompletion?(allowed)
+            }
+            return .terminateLater
+        }
         defer { handlingTermination = false }
-        if let request = SystemTerminationRequest(event: event), !confirm(request) { return .terminateCancel }
+        return finishTermination()
+    }
+    func finishTermination() -> NSApplication.TerminateReply {
         do {
             try engine.shutdownNow()
             diagnostics.record(.shutdown); diagnostics.flush(); return .terminateNow
@@ -767,6 +880,7 @@ do {
         try brandTests()
         try presentationTests()
         try terminationTests()
+        try automaticLockTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
     } else if CommandLine.arguments.contains("--verify-setup-script") {

@@ -24,7 +24,8 @@ func applicationMenu(target: NSObject? = nil) -> NSMenu {
     root.addItem(edit)
     let controls = NSMenuItem(title: "Управление", action: nil, keyEquivalent: ""); controls.submenu = NSMenu(title: "Управление"); controls.submenu?.autoenablesItems = false
     for (title, action, tag) in [("Mac не засыпает", #selector(MenuApp.toggleSleep), 22),
-                                 ("Экран не гаснет", #selector(MenuApp.toggleDisplay), 23)] {
+                                 ("Экран не гаснет", #selector(MenuApp.toggleDisplay), 23),
+                                 ("Не блокировать автоматически", #selector(MenuApp.toggleLock), 24)] {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.tag = tag; item.target = target; controls.submenu?.addItem(item)
     }
     controls.submenu?.addItem(.separator())

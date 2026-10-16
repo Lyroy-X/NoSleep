@@ -7,6 +7,7 @@ func uiTests(runTerminationRegression: Bool = true) throws {
     let controls = menu.items.first { $0.title == "Управление" }!.submenu!
     assert(controls.item(withTag: 22)?.action == #selector(MenuApp.toggleSleep))
     assert(controls.item(withTag: 23)?.action == #selector(MenuApp.toggleDisplay))
+    assert(controls.item(withTag: 24)?.action == #selector(MenuApp.toggleLock))
     assert(controls.item(withTag: 25)?.action == #selector(MenuApp.toggleAll))
     assert(controls.item(withTag: 27)?.action == #selector(MenuApp.exportDiagnostics))
     assert(menu.items.contains { $0.title == "Правка" })
@@ -63,7 +64,9 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
     require(emptyScroll.documentView == nil, "native tiling before document attachment remains safe")
     owner.permissionReady = true; owner.render()
     owner.engine.deferCompletion = true
+    let commandsBefore = owner.engine.fixtureCommands.count
     owner.allButton.performClick(nil)
+    require(waitForUI({ owner.engine.fixtureCommands.count > commandsBefore }), "combined policy step reaches deferred power action")
     require(owner.busy && !owner.sleepSwitch.isEnabled && !owner.displaySwitch.isEnabled && !owner.allButton.isEnabled, "pending action disables duplicate native controls")
     require(owner.summaryLabel.stringValue == "Применяю настройки…", "pending action is explicit in the headline")
     let commandCount = owner.engine.fixtureCommands.count
@@ -75,6 +78,8 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
     owner.engine.deferCompletion = false
     require(owner.sleepSwitch.accessibilityLabel() == "Mac не засыпает" && owner.displaySwitch.accessibilityLabel() == "Экран не гаснет", "independent native switches retain assistive labels")
     require(owner.exportButton.accessibilityLabel() == "Сохранить диагностику NoSleep", "report toolbar has a meaningful assistive name")
+    owner.perform("all-off")
+    require(waitForUI({ !owner.busy }), "keyboard fixture begins with all three protections off")
     owner.current = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
     owner.render()
     let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: 0,
@@ -105,7 +110,7 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
                 require(label.bounds.height + 1 >= label.intrinsicContentSize.height, "\(name): text is not vertically clipped")
             }
         }
-        if owner.setupRow.isHidden && owner.errorLabel.isHidden && owner.window.contentView!.bounds.height >= 430 {
+        if owner.setupRow.isHidden && owner.errorLabel.isHidden && owner.window.contentView!.bounds.height >= 560 {
             require(document.bounds.height <= scroll.contentView.bounds.height + 1, "\(name): ready compact content needs no scrolling")
         }
         var pixels: Data?
@@ -128,7 +133,7 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
         owner.permissionReady = true
         owner.current = LiveState(systemWanted: true, systemActual: true, displayWanted: false, displayActual: false, error: nil)
         owner.setupError = nil; owner.render()
-        owner.window.setContentSize(NSSize(width: 440, height: 430)); try layoutCheck(name + "-compact")
+        owner.window.setContentSize(NSSize(width: 440, height: 560)); try layoutCheck(name + "-compact")
         owner.window.setContentSize(NSSize(width: 700, height: 560)); try layoutCheck(name + "-expanded")
         owner.permissionReady = false
         owner.setupError = "Настройка отменена. Повторите её, когда будете готовы."

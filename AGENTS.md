@@ -57,3 +57,14 @@ or Intel runtime test from a local package check.
 - CI on Intel must execute native tests on Intel; assembling both architectures
   into a DMG alone is not an Intel runtime result. GitHub success must be confirmed
   from a real run before claiming the published pipeline works remotely.
+
+## Retained local macOS test VM
+
+A stopped macOS 27 ASIF fixture is retained in the original checkout's ignored
+`build/vpn-lab/idle-lock-macos27-20261015/` directory. Read
+[docs/test-vm.md](docs/test-vm.md) before any explicitly authorized VM work, including
+from a linked worktree. Keep its disk local and retained, use its exact isolated
+registry and independent resource/time supervisor, and verify stopped status after
+every outcome. Inventory and historical receipts do not authorize starting a VM,
+changing host settings or using a foreign VM. Never add the image, cache, raw logs
+or state backups to Git.

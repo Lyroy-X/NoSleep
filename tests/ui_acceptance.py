@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Execute current native UI with isolated in-memory power dependencies."""
-import argparse,hashlib,json,plistlib,subprocess,uuid
+import argparse,hashlib,json,plistlib,subprocess,uuid,platform
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser();parser.add_argument('--no-screenshots',action='store_true');parser.parse_args()
+if platform.system() != 'Darwin':
+ print('DEFERRED: native UI acceptance requires the dependent macOS regression lanes')
+ raise SystemExit(0)
 case=root/'build/ui-acceptance'/uuid.uuid4().hex;case.mkdir(parents=True)
 source=(root/'Sources/NoSleep.swift').read_text()
 ui=source[source.index('final class MenuApp:'):source.index('@main enum NoSleepMain')]
@@ -13,7 +16,7 @@ ui=ui.replace(old,'UIHarnessEnvironment.dataDirectory').replace('UserDefaults.st
 (case/'UI.swift').write_text('import AppKit\n'+ui)
 bundle='local.NoSleep.UIFixture.'+uuid.uuid4().hex
 app=case/'Fixture.app';exe=app/'Contents/MacOS/Fixture';exe.parent.mkdir(parents=True)
-inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'tests/ui_harness/TerminationAcceptance.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift',root/'Sources/Termination.swift',root/'Sources/NoSleepBrand.swift',root/'Sources/PowerPresentation.swift',root/'Sources/PresentationTests.swift']
+inputs=[case/'UI.swift',root/'tests/ui_harness/Stubs.swift',root/'tests/ui_harness/Entry.swift',root/'tests/ui_harness/TerminationAcceptance.swift',root/'tests/ui_harness/AutomaticLockAcceptance.swift',root/'Sources/AutomaticLock.swift',root/'Sources/AutomaticLockTests.swift',root/'Sources/ApplicationMenu.swift',root/'Sources/UITests.swift',root/'Sources/Termination.swift',root/'Sources/NoSleepBrand.swift',root/'Sources/PowerPresentation.swift',root/'Sources/PresentationTests.swift']
 (case/'Aggregate.swift').write_text('func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }\n');inputs.append(case/'Aggregate.swift')
 result=subprocess.run(['swiftc','-D','NOSLEEP_UI_FIXTURE','-module-cache-path',str(root/'build/module-cache/ui-rollback'),*map(str,inputs),'-o',str(exe)],capture_output=True,text=True,timeout=90)
 (case/'compile.log').write_text(result.stdout+result.stderr)
