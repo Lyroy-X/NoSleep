@@ -2,6 +2,7 @@ import Foundation
 func featureExpect(_ expression: @autoclosure () throws -> Bool) throws { let result = try expression(); assert(result) }
 func aggregateTitle(system: Bool, display: Bool) -> String { system || display ? "Выключить всё" : "Включить всё" }
 func featureTests() throws {
+    try protectionDependencyTests()
     for bits in 0..<4 { assert(aggregateTitle(system: bits & 1 != 0, display: bits & 2 != 0) == (bits == 0 ? "Включить всё" : "Выключить всё")) }
     let power = FakePower(); let engine = GuardEngine(power)
     let on = DispatchSemaphore(value: 0)
@@ -18,6 +19,61 @@ func featureTests() throws {
     try diagnosticStreamingTests()
     if ProcessInfo.processInfo.environment["NOSLEEP_TEST_LARGE_LOGS"] == "1" { try diagnosticLargeBudgetTests() }
     print("PASS: all combined-control states")
+}
+
+func protectionDependencyTests() throws {
+    let fake = FakePower(), control = Protection(FakePower())
+    let protection = Protection(fake)
+    try protection.setDisplay(true)
+    // Use the self-test's error channel so the base-transplant runner retains
+    // the precise behavioral assertion instead of only a process crash.
+    guard protection.active && protection.displayActive && fake.value && fake.idle && fake.display else {
+        throw PowerError(message: "Assertion failed: display-on must confirm the system prerequisite")
+    }
+    try protection.setDisplay(false)
+    assert(protection.active && fake.value && !fake.display, "Display-off must preserve system protection")
+    try protection.setDisplay(true)
+    fake.reject = true
+    do { try protection.disable(); fatalError("System refusal was hidden") } catch {}
+    assert(protection.active && protection.displayActive && fake.display && fake.idle,
+           "Refused system-off must retain both guards")
+    fake.reject = false
+    try protection.disable()
+    assert(!protection.active && !protection.displayActive && !fake.display && !fake.idle)
+    fake.reject = true
+    do { try protection.setDisplay(true); fatalError("Missing prerequisite accepted") } catch {}
+    assert(!protection.active && !protection.displayActive && !fake.display && !fake.idle)
+    fake.reject = false; fake.rejectDisplay = true
+    do { try protection.setDisplay(true); fatalError("Display refusal was hidden") } catch {}
+    assert(protection.active && fake.value && !protection.displayActive && !fake.display,
+           "Partial enable retains successfully acquired system protection")
+    fake.rejectDisplay = false
+    try protection.setDisplay(true)
+    fake.value = false
+    try protection.setDisplay(true)
+    assert(fake.value && fake.display, "Repeated display-on recovers its system prerequisite")
+    try protection.shutdown()
+    try control.shutdown() // Empty cleanup is valid and repeatable.
+    for flags in 0..<16 {
+        let sw = flags & 1 != 0, sa = flags & 2 != 0, dw = flags & 4 != 0, da = flags & 8 != 0
+        let state = LiveState(systemWanted: sw, systemActual: sa, displayWanted: dw, displayActual: da, error: nil)
+        let missing = (sw && !sa) || (dw && !da)
+        assert((state.statusTitle == " !") == missing, "Any selected unconfirmed protection must flag the common status")
+    }
+    // All 216 three-command sequences exercise normal/repeated/reverse boundaries.
+    let commands = ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off"]
+    for a in commands { for b in commands { for c in commands {
+        let engine = GuardEngine(FakePower())
+        for command in [a, b, c] {
+            let done = DispatchSemaphore(value: 0)
+            engine.act(command, save: false) { done.signal() }
+            assert(done.wait(timeout: .now() + 3) == .success)
+            let state = engine.queue.sync { engine.state() }
+            assert(!state.displayWanted || (state.systemWanted && state.systemActual), "No display-only owned state is valid")
+            assert(state.error == nil && state.systemWanted == state.systemActual && state.displayWanted == state.displayActual)
+        }
+    } } }
+    print("PASS: directional protection normal/refusal/retry, 16 confirmation states and 216 command sequences")
 }
 func diagnosticsTests() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("NoSleep-tests-\(UUID().uuidString)", isDirectory: true)

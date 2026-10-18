@@ -1,5 +1,44 @@
 # NoSleep changes
 
+## [4.1.0]
+
+- Add independent sleep/display duration popovers with presets, custom hours/minutes, remaining time and explicit baseline-return text.
+- Remember five recent unique custom durations per feature, with accessible removal crosses; removal does not interrupt an active timer. Failed activation does not save a choice.
+- Reconcile continuous deadlines on the existing power queue, preserving the display prerequisite, manual commands, refusal/retry and original launch preferences. Interrupted temporary sessions restore their baseline at the next ready launch instead of restarting a full timer.
+- Keep automatic-lock manual under its existing fresh-password contract. Add isolated engine, history, native popover and critical mutation tests.
+- Use a compatible minor bump from the prepared 4.0.1 interface; build 21 exceeds prepared build 20 and current main. Existing breaking dependency changes remain represented by major version 4. No installation or publication is implied.
+
+## [4.0.1]
+
+- Restore the status icon, confirmed headline and per-control symbols omitted from the local 4.0.0 build.
+- Animate meaningful status-symbol changes with finite native SF Symbol transitions; honor Reduce Motion, hidden windows and unchanged state.
+- Drain power-command output while waiting with bounded time and bytes; recognize existing permissions instead of leaving controls disabled after a blocked child.
+- Route quit outside the main-dispatch notification callback so asynchronous restoration can deliver its password dialog. Serialize a fresh request until a cancelled AppKit termination unwinds.
+- Patch corrective behavior; build 20 exceeds the locally installed build 19 and all prior prepared builds. Local installation is requested; no publication is implied.
+
+## [4.0.0]
+
+- Make display protection acquire confirmed system sleep protection. Turning sleep
+  protection off turns both off; turning display protection off retains sleep protection.
+- Require initial power setup before enabling either protection, including direct commands.
+  Normalize legacy display-only saved preferences during serialized startup.
+- Retain saved display selection after initial power setup and keep status-menu
+  availability under the same explicit readiness guards as the window.
+- Attempt complete power cleanup on every diagnostic display-probe exit and
+  report refused cleanup; verify the actual CLI branch with fake power and retry.
+- Persist retained protection after partial failures and flag every selected but
+  unconfirmed protection in the common status; preserve refusal and retry behavior.
+- Add exhaustive transition, isolated native UI and critical mutation checks.
+- Replace the long modal help with a small contextual card for downloads,
+  presentations and GUI automation; keep restoration details available separately.
+- Animate switches and changed status text using native 0.2-second transitions;
+  honor Reduce Motion and avoid animation for hidden windows or unchanged state.
+- Close contextual help without animation when the app is inactive, avoiding a
+  dependency on taking foreground focus; run native acceptance in a real AppKit lifecycle.
+- Use a major bump because independent display-only operation is removed. Build 16
+  exceeds main's build 13 and the pre-existing prepared build 15. This includes the
+  compatible automatic-lock, termination and release work already in the checkout.
+
 ## [3.6.0]
 
 - Add independent automatic-lock control inside the compact native UI, with a secure password prompt for each required policy change.

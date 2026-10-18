@@ -9,13 +9,13 @@ root = Path(__file__).resolve().parents[1]
 output = root / "build/compact-mutation"
 output.mkdir(parents=True, exist_ok=True)
 source = (root / "Sources/PowerPresentation.swift").read_text()
-needle = "if hasError || (systemWanted && !systemActual) || (displayWanted && !displayActual) {"
+needle = "if hasError || (systemWanted && !systemActual) || (displayWanted && (!displayActual || !systemWanted || !systemActual)) {"
 assert source.count(needle) == 1
 with tempfile.TemporaryDirectory(prefix="nosleep-status-mutation-") as folder:
     private = Path(folder)
     entry = private / "Entry.swift"
     entry.write_text("import Foundation\n@main enum StatusCheck { static func main() throws { try presentationTests() } }\n")
-    for name, candidate in [("original", source), ("faulty", source.replace(needle, "if hasError || (displayWanted && !displayActual) {"))]:
+    for name, candidate in [("original", source), ("faulty", source.replace(needle, "if hasError || (displayWanted && (!displayActual || !systemWanted || !systemActual)) {"))]:
         fixture = private / "PowerPresentation.swift"
         fixture.write_text(candidate)
         binary = private / name

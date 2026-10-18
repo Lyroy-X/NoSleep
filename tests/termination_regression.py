@@ -31,7 +31,8 @@ class TerminationRegressionTests(unittest.TestCase):
                 raise RuntimeError("fixture application-support boundary changed")
             ui = ui.replace(old, "UIHarnessEnvironment.dataDirectory").replace("UserDefaults.standard", "UIHarnessEnvironment.defaults")
             (case / "UI.swift").write_text("import AppKit\n" + ui)
-            (case / "Stubs.swift").write_text(STUBS)
+            has_timers = (ROOT / "Sources/TimedProtection.swift").exists()
+            (case / "Stubs.swift").write_text((ROOT / "tests/ui_harness/Stubs.swift").read_text() if has_timers else STUBS)
             driver = DRIVER
             has_lock = (ROOT / "Sources/AutomaticLock.swift").exists()
             if has_lock:
@@ -49,6 +50,8 @@ class TerminationRegressionTests(unittest.TestCase):
                 inputs.append(ROOT / "Sources/PowerPresentation.swift")
             if has_lock:
                 inputs.extend([ROOT / "Sources/AutomaticLock.swift", ROOT / "Sources/AutomaticLockTests.swift"])
+            if has_timers:
+                inputs.extend(ROOT / path for path in ["Sources/TimedProtection.swift", "Sources/DurationPopover.swift", "Sources/InterfaceMotion.swift"])
             executable = case / "Fixture"
             compile_result = subprocess.run(["swiftc", "-module-cache-path", str(ROOT / "build/module-cache/termination-regression"), *map(str, inputs), "-o", str(executable)], capture_output=True, text=True, timeout=90)
             if compile_result.returncode:

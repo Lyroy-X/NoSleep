@@ -58,3 +58,9 @@ receipts, safety constraints and limits are in [test-vm.md](test-vm.md). Those
 receipts validate the system route; the ported compact UI requires fresh local
 and remote regression. Universal packaging does not prove Intel execution;
 Intel CI remains disabled by the existing repository decision.
+
+## Timed protection 4.1.0
+
+The isolated native suite covers finite system/display leases, overlapping deadlines, baseline restoration, acquisition/refusal/retry, separate-process history and deletion, seven critical timer mutations, native popover fields and light/dark layouts. Updated native viewport acceptance retains the current-main fitting scroll view, keyboard shortcut, delayed completion and high-contrast/legacy-scroller cases at 600×620 with a 520-point minimum width for duration controls. No test operates the installed app or real power settings.
+
+Manual sleep/wake, lid closure, first administrative setup, physical process interruption, shutdown/restart and downloaded-app Gatekeeper require separate explicit acceptance. Intel execution remains disabled by current-main CI policy; universal packaging is not an Intel runtime result.

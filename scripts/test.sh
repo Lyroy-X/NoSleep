@@ -24,6 +24,11 @@ python3 "$project_dir/tests/public_repository_acceptance.py"
 python3 "$project_dir/tests/power_handoff_contract.py"
 python3 "$project_dir/tests/power_helper_installer_contract.py"
 python3 "$project_dir/tests/automatic_lock_acceptance.py"
+python3 "$project_dir/tests/timed_protection_acceptance.py"
+python3 "$project_dir/tests/control_dependencies_acceptance.py"
+python3 "$project_dir/tests/power_process_acceptance.py"
+python3 "$project_dir/tests/quit_routing_acceptance.py"
+python3 "$project_dir/tests/presentation_acceptance.py"
 "$project_dir/scripts/build.sh"
 python3 "$project_dir/tests/brand_assets_acceptance.py"
 swift -module-cache-path "$test_root/module-cache" "$project_dir/tests/icon_background_acceptance.swift" "$NOSLEEP_APP" "$project_dir/Resources/NoSleep-icon.png"
@@ -36,5 +41,7 @@ else
 fi
 if [[ "$mode" == --local ]]; then
   python3 "$project_dir/tests/ui_acceptance.py" --no-screenshots
+  python3 "$project_dir/tests/lifecycle_acceptance.py"
+  python3 "$project_dir/tests/control_dependencies_acceptance.py" --ui-mutations
 fi
 print "PASS: NoSleep regression checks ($mode); working app and real Cisco were not controlled"
