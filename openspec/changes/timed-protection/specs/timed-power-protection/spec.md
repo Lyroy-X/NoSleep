@@ -54,3 +54,10 @@ The picker SHALL use semantic native colors, accessible controls, keyboard editi
 #### Scenario: Native saved-chip acceptance
 - **WHEN** the isolated UI enters a custom duration, retries failure, removes its chip and finishes a session
 - **THEN** actual native controls, persisted isolated history and baseline state agree in light/dark appearances
+
+### Requirement: Discoverable timer action
+The idle per-function duration control SHALL show a native timer symbol and a clear localized timer label, retaining the symbol beside an active countdown.
+
+#### Scenario: Recognize and reuse the duration control
+- **WHEN** protection is idle, running, refused, or finished
+- **THEN** the duration action remains recognizable as a timer and preserves permission gating

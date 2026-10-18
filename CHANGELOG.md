@@ -5,6 +5,8 @@
 - Add independent sleep/display duration popovers with presets, custom hours/minutes, remaining time and explicit baseline-return text.
 - Remember five recent unique custom durations per feature, with accessible removal crosses; removal does not interrupt an active timer. Failed activation does not save a choice.
 - Reconcile continuous deadlines on the existing power queue, preserving the display prerequisite, manual commands, refusal/retry and original launch preferences. Interrupted temporary sessions restore their baseline at the next ready launch instead of restarting a full timer.
+- Identify duration actions with the native timer symbol and a clear label; retain the icon beside running countdowns.
+- Keep timer-row switches aligned across regular, small and mini native AppKit metrics on supported macOS versions.
 - Keep automatic-lock manual under its existing fresh-password contract. Add isolated engine, history, native popover and critical mutation tests.
 - Use a compatible minor bump from the prepared 4.0.1 interface; build 21 exceeds prepared build 20 and current main. Existing breaking dependency changes remain represented by major version 4. No installation or publication is implied.
 

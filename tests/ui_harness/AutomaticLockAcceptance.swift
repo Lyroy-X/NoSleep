@@ -125,6 +125,21 @@ func automaticLockUIAcceptance(_ owner: MenuApp, _ app: NSApplication,
     owner.window.contentView!.layoutSubtreeIfNeeded()
     require(owner.lockSwitch.frame.width > 0 && owner.lockState.frame.width > 100,
             "third control and wrapped state have usable native layout")
+    // AppKit intrinsic switch widths differ across supported macOS versions.
+    // Exercise those native size variants without weakening the shared trailing edge.
+    for size in [NSControl.ControlSize.regular, .small, .mini] {
+        for control in [owner.sleepSwitch!, owner.displaySwitch!, owner.lockSwitch!] { control.controlSize = size }
+        for width: CGFloat in [520, 600, 700] {
+            owner.window.setContentSize(NSSize(width: width, height: 620))
+            owner.window.contentView!.layoutSubtreeIfNeeded()
+            let edges = [owner.sleepSwitch!, owner.displaySwitch!, owner.lockSwitch!].map {
+                $0.convert($0.bounds, to: owner.window.contentView).maxX
+            }
+            print("LAYOUT: size=\(size.rawValue), width=\(width), edges=\(edges)")
+            require(edges.max()! - edges.min()! < 2, "native size variants keep all switch trailing edges aligned")
+        }
+    }
+    for control in [owner.sleepSwitch!, owner.displaySwitch!, owner.lockSwitch!] { control.controlSize = .regular }
     let displayEdge = owner.displaySwitch.convert(owner.displaySwitch.bounds, to: owner.window.contentView).maxX
     let lockEdge = owner.lockSwitch.convert(owner.lockSwitch.bounds, to: owner.window.contentView).maxX
     require(abs(displayEdge - lockEdge) < 2, "all three native switches share the trailing alignment")

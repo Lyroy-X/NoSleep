@@ -30,3 +30,13 @@ The delivery worktree is based on current main `d10712d3b24f4686f716dea7ddee13fc
 New exact-diff quality and native UI E2E passed after integration; the initial complete native run exposed missing new-module dependencies in the existing isolated termination regression compiler. That test compiler now conditionally uses the current hermetic stubs/modules while retaining its legacy base fixture; both cancellation and confirmation-bypass mutation pass. The entire quality/native suite is rerun, and final receipts under the original checkout’s ignored `build/timed-protection-delivery/` are authoritative for delivery. Universal package/read-only DMG acceptance passed on the unchanged app sources. GitHub CI, installation and publication must be read back separately before being claimed complete.
 
 User delivery instruction authorizes local update, commit/push, a new or existing PR and a new release. Personal review remains waived; final merge follows host instructions. Project memory remains disabled by the explicit no-save choice.
+
+### Hosted macOS alignment finding
+
+PR #7 commit `31261f4f98d746e4178b77e59b312b5768ae6349` passed quality but its native lane failed the existing trailing-edge assertion on macOS 15.7.9/Swift 6.1.2 (Actions run 39118645645, job 117649521921). Local regular controls had hidden the gravity-area difference. The expanded unchanged-code UI test reproduces small-size edges `[474, 474, 484]` at width 520 and fails by assertion. Setting only the two duration-group distributions to `.fill` yields `[484, 484, 484]`; regular/small/mini cases at widths 520, 600 and 700 pass. Before/after logs are retained privately as `alignment-before.log` / `alignment-after.log`. The existing lock alignment assertion remains; no tolerance was relaxed. Full quality/native/package checks and CI must be refreshed for this source change.
+
+### Discoverable timer action and modal fixture
+
+User explicitly requested replacing the ambiguous infinity action. Idle controls now show the `timer` SF Symbol and localized “Таймер”; running controls retain the symbol beside their duration. Native assertions cover normal, disabled, running, refusal/retry and completed presentation. The latest focused native E2E passed (`timer-label-ui.log`).
+
+A separate exact-alert probe established that macOS can refuse foreground activation of background test processes. Return is delegated to AppKit: the native test now asserts the safe default binding and activates its actual default cell, checking cancellation and retained power; Escape still sends its event through the production monitor. Physical keyboard delivery in an inactive process is not a supported claim. No production termination behavior changed.

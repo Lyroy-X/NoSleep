@@ -16,6 +16,15 @@ func timedUIAcceptance() throws {
     owner.engine.timingChanged = { owner.timedState = $0; owner.render() }
     owner.render(); owner.window.orderFrontRegardless()
     defer { owner.durationPopover?.close(); owner.window.orderOut(nil) }
+    for button in [owner.sleepDurationButton!, owner.displayDurationButton!] {
+        require(button.title == "Таймер" && button.image != nil && button.imagePosition == .imageLeading,
+                "idle duration control has a native timer icon and a clear Timer label")
+    }
+    let timerIcon = owner.displayDurationButton.image
+    owner.permissionReady = false; owner.render()
+    require(!owner.displayDurationButton.isEnabled && owner.displayDurationButton.title == "Таймер",
+            "unavailable timer remains identifiable while refusing activation")
+    owner.permissionReady = true; owner.render()
     owner.showDisplayDuration()
     guard let popover = owner.durationPopover, let picker = popover.contentViewController as? DurationPopover else {
         require(false, "native duration popover exists"); return
@@ -36,6 +45,7 @@ func timedUIAcceptance() throws {
             "successful native custom duration saves only after protection is confirmed")
     require(owner.timedState.remaining[.display] == 18000 && owner.displayDurationButton.title.contains("5 ч"),
             "native row displays its independent remaining duration")
+    require(owner.displayDurationButton.image === timerIcon, "countdown retains its native timer icon")
     let originalLabel = owner.displayState!
     let counting = TimedCountingLabel(); counting.stringValue = originalLabel.stringValue; counting.writes = 0
     owner.displayState = counting; owner.render(); owner.render()
@@ -55,6 +65,7 @@ func timedUIAcceptance() throws {
     again.finishNow(); spinUntil { !owner.busy }
     require(!owner.current.displayWanted && !owner.current.systemWanted && owner.timedState.remaining.isEmpty,
             "finish-now returns the original state rather than an unrelated default")
+    require(owner.displayDurationButton.title == "Таймер" && owner.displayDurationButton.image != nil, "finished timer returns to its clear native action")
     for n in [300, 301, 302, 303, 304] { history.remember(n, for: .display) }
     owner.showDisplayDuration()
     let full = owner.durationPopover!.contentViewController as! DurationPopover; _ = full.view; full.showCustom()

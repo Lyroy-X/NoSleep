@@ -671,16 +671,19 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         setupLabel.widthAnchor.constraint(equalTo: setupRow.widthAnchor).isActive = true
         sleepSwitch = switchControl("Mac не засыпает", action: #selector(toggleSleep))
         displaySwitch = switchControl("Экран не гаснет", action: #selector(toggleDisplay))
-        sleepDurationButton = NSButton(title: "∞", target: self, action: #selector(showSleepDuration))
-        displayDurationButton = NSButton(title: "∞", target: self, action: #selector(showDisplayDuration))
+        sleepDurationButton = NSButton(title: "Таймер", target: self, action: #selector(showSleepDuration))
+        displayDurationButton = NSButton(title: "Таймер", target: self, action: #selector(showDisplayDuration))
         sleepDurationButton.setAccessibilityLabel("Время защиты сна")
         displayDurationButton.setAccessibilityLabel("Время защиты экрана")
         for button in [sleepDurationButton!, displayDurationButton!] {
             button.bezelStyle = .rounded; button.controlSize = .small
+            button.image = NSImage(systemSymbolName: "timer", accessibilityDescription: nil); button.imagePosition = .imageLeading
             button.widthAnchor.constraint(equalToConstant: 88).isActive = true
         }
         let sleepControls = NSStackView(views: [sleepDurationButton, sleepSwitch]); sleepControls.spacing = 8
         let displayControls = NSStackView(views: [displayDurationButton, displaySwitch]); displayControls.spacing = 8
+        // Fill the row through its trailing switch across native intrinsic sizes.
+        sleepControls.distribution = .fill; displayControls.distribution = .fill
         sleepControls.widthAnchor.constraint(equalToConstant: 150).isActive = true
         displayControls.widthAnchor.constraint(equalToConstant: 150).isActive = true
         lockSwitch = switchControl("Не блокировать автоматически", action: #selector(toggleLock))
@@ -828,7 +831,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         for (feature, button) in [(TimedFeature.system, sleepDurationButton!), (.display, displayDurationButton!)] {
             button.isEnabled = !busy && permissionReady == true
             if let remaining = timedState.remaining[feature] {
-                button.title = "◷ " + DurationHistory.label(max(1, (remaining + 59) / 60))
+                button.title = DurationHistory.label(max(1, (remaining + 59) / 60))
                 let end = Date().addingTimeInterval(Double(remaining)).formatted(date: .omitted, time: .shortened)
                 let returned = timedState.returns[feature] == true ? "останется включено" : "обычный режим"
                 let detail = timedState.failed ? "Не удалось завершить таймер. Повторите восстановление." : "До \(end) · затем: \(returned)"
@@ -836,7 +839,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
                 if feature == .system { sleepText = pendingPowerAction == nil && confirmed ? detail : sleepText + "\n" + detail }
                 else { displayText = pendingPowerAction == nil && confirmed ? detail : displayText + "\n" + detail }
                 button.toolTip = "Изменить время. Осталось \(remaining) с; затем: \(returned)."
-            } else { button.title = "∞"; button.toolTip = "Включить на время или без таймера" }
+            } else { button.title = "Таймер"; button.toolTip = "Включить на время или без таймера" }
         }
         if timedState.remaining[.system] == nil, timedState.remaining[.display] != nil, timedState.returns[.system] == false {
             if current.systemActual && pendingPowerAction == nil { sleepText = "Нужен для экрана · затем обычный режим" }
