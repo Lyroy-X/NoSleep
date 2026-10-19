@@ -58,3 +58,13 @@ receipts, safety constraints and limits are in [test-vm.md](test-vm.md). Those
 receipts validate the system route; the ported compact UI requires fresh local
 and remote regression. Universal packaging does not prove Intel execution;
 Intel CI remains disabled by the existing repository decision.
+
+## Timed protection 4.1.0
+
+The isolated native suite covers finite system/display leases, overlapping deadlines, baseline restoration, acquisition/refusal/retry, separate-process history and deletion, seven critical timer mutations, native popover fields and light/dark layouts. Updated native viewport acceptance retains the current-main fitting scroll view, keyboard shortcut, delayed completion and high-contrast/legacy-scroller cases at 600×620 with a 520-point minimum width for duration controls. No test operates the installed app or real power settings.
+
+Manual sleep/wake, lid closure, first administrative setup, physical process interruption, shutdown/restart and downloaded-app Gatekeeper require separate explicit acceptance. Intel execution remains disabled by current-main CI policy; universal packaging is not an Intel runtime result.
+
+The release CI found a native trailing-edge difference on macOS 15.7.9/Swift 6.1.2. An isolated local small-switch case reproduced a 10-point error before the fix; timer groups now fill their width just like the lock group. The retained alignment assertion also exercises regular/small/mini sizes and widths 520/600/700.
+
+Idle duration actions use the native timer SF Symbol and the localized “Таймер” label; focused native checks cover disabled, running and completed states. The modal fixture validates the AppKit Return binding by activating its configured native default cell (physical keyboard delivery requires desktop focus and is not claimed); Escape still exercises the production local event monitor. This avoids depending on a background fixture stealing the user’s foreground application.

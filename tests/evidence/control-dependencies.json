@@ -1,0 +1,37 @@
+[
+  {
+    "behavior": "Directional display-to-system prerequisite, refusal/retry, retained partial preferences, serialized startup/setup, native menu guards, honest status/help and diagnostic cleanup on error, preserving password-confirmed lock behavior; bounded power command readiness and deferred native quit",
+    "mode": "regression",
+    "productionPaths": [
+      "Sources/NoSleep.swift"
+    ],
+    "tests": [
+      "Sources/FeatureTests.swift",
+      "tests/control_dependencies_acceptance.py",
+      "tests/ui_acceptance.py",
+      "tests/power_process_acceptance.py",
+      "tests/lifecycle_acceptance.py",
+      "tests/presentation_acceptance.py",
+      "tests/quit_routing_acceptance.py",
+      "tests/termination_regression.py",
+      "tests/ui_harness/AutomaticLockAcceptance.swift",
+      "tests/ui_harness/TerminationAcceptance.swift",
+      "tests/ui_harness/TimedAcceptance.swift"
+    ]
+  },
+  {
+    "behavior": "Native switch and status transitions with immediate state, unchanged-render no-op and reduced-motion/hidden-window fallback; restored confirmed status summary and finite native SF Symbol transitions",
+    "mode": "new-capability",
+    "productionPaths": [
+      "Sources/InterfaceMotion.swift",
+      "Sources/PowerPresentation.swift"
+    ],
+    "tests": [
+      "Sources/UITests.swift",
+      "tests/ui_acceptance.py",
+      "Sources/PresentationTests.swift",
+      "tests/presentation_acceptance.py",
+      "tests/compact_status_mutation.py"
+    ]
+  }
+]

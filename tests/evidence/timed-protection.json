@@ -1,0 +1,27 @@
+[
+  {
+    "behavior": "Independent continuous-deadline protection with captured baseline, persistent bounded feature-scoped custom chips and accessible native popover; preserve password and permission gates",
+    "mode": "new-capability",
+    "productionPaths": [
+      "Sources/TimedProtection.swift",
+      "Sources/DurationPopover.swift"
+    ],
+    "tests": [
+      "Sources/TimedProtectionTests.swift",
+      "tests/timed_protection_acceptance.py",
+      "tests/ui_acceptance.py"
+    ]
+  },
+  {
+    "behavior": "Existing isolated regression runner executes new timers, dependency, power process, lifecycle and presentation contracts",
+    "mode": "preservation",
+    "productionPaths": [
+      "scripts/test.sh"
+    ],
+    "tests": [
+      "Sources/TimedProtectionTests.swift",
+      "tests/timed_protection_acceptance.py",
+      "tests/ui_acceptance.py"
+    ]
+  }
+]

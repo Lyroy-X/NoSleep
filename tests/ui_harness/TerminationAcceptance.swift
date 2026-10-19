@@ -23,7 +23,16 @@ func nativeTerminationAcceptance(_ owner: MenuApp, _ app: NSApplication) throws 
         require(alert.buttons[0].keyEquivalent == "\r" && alert.buttons[1].keyEquivalent.isEmpty, "Return cancels and continue has no implicit shortcut")
         require(alert.messageText == (request == .shutdown ? "Выключить Mac?" : "Перезапустить Mac?"), "native dialog identifies system action")
         let before = owner.engine.fixtureShutdownCount
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        let readinessDeadline = ProcessInfo.processInfo.systemUptime + 3
+        func respondWhenReady() {
+            guard app.modalWindow === alert.window, alert.window.isVisible else {
+                guard ProcessInfo.processInfo.systemUptime < readinessDeadline else {
+                    require(false, "isolated modal confirmation is visible before keyboard input")
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: respondWhenReady)
+                return
+            }
             require(owner.engine.fixtureShutdownCount == before && owner.engine.state().systemWanted && owner.engine.state().displayWanted,
                     "pending confirmation retains protection without cleanup")
             require(owner.terminationReply(for: nil) { _ in fatalError("unexpected second prompt") } == .terminateCancel,
@@ -33,9 +42,15 @@ func nativeTerminationAcceptance(_ owner: MenuApp, _ app: NSApplication) throws 
                                           windowNumber: alert.window.windowNumber, context: nil,
                                           characters: keyboard, charactersIgnoringModifiers: keyboard,
                                           isARepeat: false, keyCode: keyboard == "\r" ? 36 : 53)!
-                app.sendEvent(key)
+                if keyboard == "\r" {
+                    // Return belongs to AppKit's configured default binding. A background
+                    // fixture cannot steal desktop keyboard focus, so activate that exact
+                    // native default cell; Escape still exercises our event monitor below.
+                    alert.window.defaultButtonCell!.performClick(nil)
+                } else { app.sendEvent(key) }
             } else { alert.buttons[button].performClick(nil) }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: respondWhenReady)
         app.activate(ignoringOtherApps: true)
         return runSystemTerminationConfirmation(alert)
     }

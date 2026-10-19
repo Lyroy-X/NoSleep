@@ -8,13 +8,14 @@ func presentationTests() throws {
     }
     assert(present().title == "Защита выключена")
     assert(present(true, true).title == "Mac под защитой")
-    assert(present(false, false, true, true).title == "Экран под защитой")
+    assert(present(false, false, true, true).tone == .attention, "Display cannot claim success without its sleep prerequisite")
     assert(present(true, true, true, true).detail == "Mac не засыпает · экран не гаснет")
     assert(present(false, true).tone == .neutral, "External sleep settings are not app protection")
     assert(present(false, true).detail.contains("другой настройкой"))
     assert(present(ready: nil).title == "Проверяю готовность…")
     assert(present(ready: false).title == "Настройте NoSleep")
-    assert(present(false, false, true, true, ready: false).tone == .active, "Missing sleep permission preserves display protection")
+    assert(present(ready: false).detail.contains("сна и экрана"))
+    assert(present(true, true, true, true, ready: false).tone == .active, "Already-owned confirmed protection stays visible")
     assert(present(error: true).tone == .attention)
     assert(present(true, true, true, true, error: true).tone == .attention, "Failures remain visible even with confirmed protection")
     assert(present(busy: true, error: true).title == "Применяю настройки…")
@@ -26,7 +27,7 @@ func presentationTests() throws {
             for display in [false, true] {
                 for actualDisplay in [false, true] {
                     let view = present(sleep, actualSleep, display, actualDisplay)
-                    let failed = (sleep && !actualSleep) || (display && !actualDisplay)
+                    let failed = (sleep && !actualSleep) || (display && (!actualDisplay || !sleep || !actualSleep))
                     assert((view.tone == .attention) == failed, "All request/confirmation boundaries are explicit")
                     if view.tone == .active {
                         assert((sleep && actualSleep) || (display && actualDisplay))
@@ -35,5 +36,11 @@ func presentationTests() throws {
             }
         }
     }
+    let recovery = PowerPresentation.make(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false,
+        permissionReady: true, busy: false, hasError: false, lockEnabled: true, lockRecovery: true)
+    assert(recovery.symbol == "lock.trianglebadge.exclamationmark" && recovery.tone == .attention)
+    let lockOnly = PowerPresentation.make(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false,
+        permissionReady: true, busy: false, hasError: false, lockEnabled: true)
+    assert(lockOnly.symbol == "lock.open" && lockOnly.title == "Автоблокировка отключена")
     print("PASS: compact status normal/checking/setup/pending/error/external state, all 16 confirmation boundaries and retry")
 }

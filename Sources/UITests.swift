@@ -1,6 +1,27 @@
 import AppKit
 
 func uiTests(runTerminationRegression: Bool = true) throws {
+    try presentationTests()
+    for visible in [false, true] { for reduced in [false, true] {
+        assert(InterfaceMotion.duration(visible: visible, reduceMotion: reduced) == (visible && !reduced ? 0.2 : 0))
+    } }
+    for visible in [false, true] { for active in [false, true] { for reduced in [false, true] {
+        assert(InterfaceMotion.popoverAnimates(visible: visible, active: active, reduceMotion: reduced) == (visible && active && !reduced))
+    } } }
+    let control = NSSwitch()
+    InterfaceMotion.set(control, on: true); assert(control.state == .on)
+    InterfaceMotion.set(control, on: true); assert(control.state == .on)
+    InterfaceMotion.set(control, on: false); assert(control.state == .off)
+    let text = NSTextField(labelWithString: "Старое")
+    InterfaceMotion.text(text, "Новое"); assert(text.stringValue == "Новое" && text.alphaValue == 1)
+    InterfaceMotion.text(text, ""); assert(text.stringValue.isEmpty && text.alphaValue == 1)
+    print("PASS: native motion visible/hidden and reduced-motion policy, immediate state, repeated and empty updates")
+    let symbol = StatusSymbolView()
+    let off = PowerPresentation.make(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false,
+        permissionReady: true, busy: false, hasError: false)
+    symbol.update(off)
+    assert(symbol.image != nil && symbol.symbolName == "moon.stars" && symbol.animationRevision == 0)
+    symbol.update(off); assert(symbol.animationRevision == 0)
     let menu = applicationMenu()
     let titles = menu.items.flatMap { [$0.title] + ($0.submenu?.items.map { $0.title } ?? []) }
     assert(!titles.contains { $0.contains("VPN") || $0.contains("Cisco") })
@@ -110,7 +131,7 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
                 require(label.bounds.height + 1 >= label.intrinsicContentSize.height, "\(name): text is not vertically clipped")
             }
         }
-        if owner.setupRow.isHidden && owner.errorLabel.isHidden && owner.window.contentView!.bounds.height >= 560 {
+        if owner.setupRow.isHidden && owner.errorLabel.isHidden && owner.window.contentView!.bounds.height >= 620 {
             require(document.bounds.height <= scroll.contentView.bounds.height + 1, "\(name): ready compact content needs no scrolling")
         }
         var pixels: Data?
@@ -133,12 +154,12 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
         owner.permissionReady = true
         owner.current = LiveState(systemWanted: true, systemActual: true, displayWanted: false, displayActual: false, error: nil)
         owner.setupError = nil; owner.render()
-        owner.window.setContentSize(NSSize(width: 440, height: 560)); try layoutCheck(name + "-compact")
-        owner.window.setContentSize(NSSize(width: 700, height: 560)); try layoutCheck(name + "-expanded")
+        owner.window.setContentSize(NSSize(width: 600, height: 620)); try layoutCheck(name + "-compact")
+        owner.window.setContentSize(NSSize(width: 700, height: 620)); try layoutCheck(name + "-expanded")
         owner.permissionReady = false
         owner.setupError = "Настройка отменена. Повторите её, когда будете готовы."
         owner.current = LiveState(systemWanted: true, systemActual: false, displayWanted: false, displayActual: false, error: "Denied")
-        owner.window.setContentSize(NSSize(width: 440, height: 360)); owner.render(); try layoutCheck(name + "-setup-error")
+        owner.window.setContentSize(NSSize(width: 520, height: 360)); owner.render(); try layoutCheck(name + "-setup-error")
         require(!owner.errorLabel.isHidden && owner.setupButton.isEnabled && owner.summaryLabel.stringValue == "Проверьте защиту", "setup cancellation stays visible and retryable")
         owner.setupError = nil; owner.permissionReady = true
         owner.current = LiveState(systemWanted: true, systemActual: true, displayWanted: false, displayActual: false, error: nil); owner.render()
