@@ -9,7 +9,8 @@ struct PowerPresentation: Equatable {
 
     static func make(systemWanted: Bool, systemActual: Bool, displayWanted: Bool, displayActual: Bool,
                      permissionReady: Bool?, busy: Bool, hasError: Bool,
-                     lockEnabled: Bool = false, lockRecovery: Bool = false, lockIssue: String? = nil) -> PowerPresentation {
+                     lockEnabled: Bool = false, lockRecovery: Bool = false, lockIssue: String? = nil,
+                     lidActive: Bool = false) -> PowerPresentation {
         if busy {
             return Self(title: "Применяю настройки…", detail: "Дождитесь подтверждения macOS.", symbol: "hourglass", tone: .neutral)
         }
@@ -25,6 +26,9 @@ struct PowerPresentation: Equatable {
         }
         if systemWanted && systemActual {
             return Self(title: "Mac под защитой", detail: displayWanted && displayActual ? "Mac не засыпает · экран не гаснет" : "Запрет сна включён", symbol: "moon.stars.fill", tone: .active)
+        }
+        if lidActive {
+            return Self(title: "Mac под защитой", detail: "Защита сна при закрытой крышке включена.", symbol: "moon.stars.fill", tone: .active)
         }
         if permissionReady == false {
             return Self(title: "Настройте NoSleep", detail: "Для защиты сна и экрана нужна первоначальная настройка.", symbol: "moon.stars", tone: .neutral)

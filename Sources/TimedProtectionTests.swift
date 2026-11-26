@@ -118,7 +118,77 @@ func timedProtectionTests() throws {
     background.start()
     assert(expired.wait(timeout: .now() + 4) == .success, "Native deadline enforcement survives a blocked UI thread")
     try background.shutdownNow()
+    try watchdogFeedbackTests()
     print("PASS: timed production engine, crossed deadlines, refusal/retry, baseline recovery, bounded persistent custom chips and invalid input")
+}
+
+func watchdogFeedbackTests() throws {
+    let suite = "NoSleep.WatchdogFeedback." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let fake = FakePower(), engine = GuardEngine(fake, preferences: defaults)
+    var now: TimeInterval = 0
+    engine.timedNow = { now }
+    let acquired = DispatchSemaphore(value: 0)
+    engine.startTimed(.display, minutes: 5) { success in assert(success); acquired.signal() }
+    assert(acquired.wait(timeout: .now() + 5) == .success)
+    defer { try? engine.shutdownNow() }
+    // Exercise the actual one-second watchdog and collect everything sent to the UI.
+    func cycle(reset: Bool, refused: Bool, time: TimeInterval) -> [LiveState] {
+        let done = DispatchSemaphore(value: 0)
+        var states: [LiveState] = []
+        #if NOSLEEP_WATCHDOG_OBSERVATION
+        var observations: [LiveState] = []
+        var missingBeforeTick = false
+        #endif
+        engine.queue.sync {
+            now = time; fake.reject = refused
+            if reset { fake.value = false }
+            #if NOSLEEP_WATCHDOG_OBSERVATION
+            missingBeforeTick = engine.protection.active && !fake.value
+            engine.observed = { observations.append($0) }
+            #endif
+            engine.changed = { state in
+                states.append(state)
+                if state.systemActual || state.error != nil || !state.systemWanted { done.signal() }
+            }
+            engine.start()
+        }
+        assert(done.wait(timeout: .now() + 5) == .success, "Watchdog must finish recovery or publish refusal")
+        return engine.queue.sync {
+            engine.timer?.cancel(); engine.timer = nil; engine.changed = nil
+            #if NOSLEEP_WATCHDOG_OBSERVATION
+            engine.observed = nil
+            if missingBeforeTick {
+                assert(observations.count == 1 && observations[0].systemWanted && !observations[0].systemActual,
+                       "Raw missing protection must remain observable for diagnostics before recovery")
+            } else {
+                assert(observations.isEmpty, "Confirmed or expired protection must not invent an external reset")
+            }
+            #endif
+            return states
+        }
+    }
+    for time: TimeInterval in [0, 1, 299.999] {
+        let states = cycle(reset: true, refused: false, time: time)
+        assert(!states.isEmpty && states.allSatisfy { $0.statusTitle != " !" && $0.error == nil },
+               "ERROR: A successful watchdog repair must not publish a transient red warning before recovery")
+        assert(engine.queue.sync { engine.timingState().remaining[.display] != nil },
+               "Recovery must not finish or extend the five-minute timer")
+    }
+    let refused = cycle(reset: true, refused: true, time: 299.999)
+    assert(refused.last?.statusTitle == " !" && refused.last?.error != nil && refused.last?.systemActual == false,
+           "A refused repair must publish the real missing protection and its error")
+    let retry = cycle(reset: false, refused: false, time: 299.999)
+    assert(retry.last?.systemActual == true && retry.last?.error == nil && retry.last?.statusTitle != " !",
+           "A subsequent successful repair clears the failed watchdog outcome")
+    let expired = cycle(reset: false, refused: false, time: 300)
+    assert(expired.last?.systemWanted == false && expired.last?.displayWanted == false && !fake.value && !fake.display,
+           "At exactly five minutes both temporary guards return to their original off baseline")
+    let repeated = cycle(reset: false, refused: false, time: 301)
+    assert(repeated.allSatisfy { !$0.systemWanted && !$0.displayWanted && $0.error == nil },
+           "An expired timer cannot be reactivated by a later watchdog tick")
+    print("PASS: watchdog recovery has no transient warning; refusal/retry and exact five-minute expiration remain visible")
 }
 
 func timedPersistencePhase(_ phase: String, suite: String) {

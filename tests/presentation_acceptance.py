@@ -20,8 +20,9 @@ import AppKit
   owner.permissionReady = true; owner.render()
   func walk(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(walk) }
   let icons = walk(owner.window.contentView!).compactMap { $0 as? NSImageView }
-  guard icons.count >= 4 && icons.allSatisfy({ $0.image != nil }) else {
-   fputs("FAIL: status icon and all three row symbols must remain visible\n", stderr); exit(1)
+  guard icons.contains(where: { $0 === owner.summaryIcon }) &&
+        icons.count >= 5 && icons.allSatisfy({ $0.image != nil }) else {
+   fputs("FAIL: status icon and all four row symbols must remain visible\n", stderr); exit(1)
   }
   print("PASS: native status and all row symbols remain present")
  }
@@ -57,7 +58,7 @@ def main():
     before = 'NSStackView(views: [summaryIcon, summaryText])'
     assert source.count(before) == 1
     faulty = run(source.replace(before, 'NSStackView(views: [summaryText])'))
-    assert faulty.returncode != 0 and 'FAIL: status icon and all three row symbols' in faulty.stderr, faulty.stdout + faulty.stderr
+    assert faulty.returncode != 0 and 'FAIL: status icon and all four row symbols' in faulty.stderr, faulty.stdout + faulty.stderr
     output = ROOT/'build/icon-power-repair/presentation'; output.mkdir(parents=True,exist_ok=True)
     (output/'receipt.json').write_text(json.dumps({'result':'passed','sourceSHA256':hashlib.sha256(source.encode()).hexdigest(),'omittedIconMutantCaught':True,'realPowerActions':0},indent=2)+'\n')
     print('PASS: actual native presentation and omitted-icon mutant')

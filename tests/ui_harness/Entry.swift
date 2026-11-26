@@ -35,6 +35,62 @@ func captureNative(_ view: NSView, _ name: String) throws {
     let composed = NSBitmapImageRep(data: image.tiffRepresentation!)!
     try composed.representation(using: .png, properties: [:])!.write(to: UIHarnessEnvironment.output.appendingPathComponent(name + ".png"))
 }
+
+private func lidSleepAcceptance(_ owner: MenuApp, app: NSApplication) throws {
+    let title = "Не усыплять Mac с закрытой крышкой"
+    let menu = app.mainMenu!.items.first { $0.title == "Управление" }!.submenu!
+    let appItem = menu.item(withTag: 26)!
+    let statusItem = owner.item.menu!.item(withTag: 6)!
+    let labels = walk(owner.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
+    require(labels.contains(title) && owner.lidSwitch.accessibilityLabel() == title &&
+            appItem.title == title && statusItem.title == title &&
+            owner.sleepSwitch.accessibilityLabel() == "Mac не засыпает" && menu.item(withTag: 22)?.title == "Mac не засыпает",
+            "window, accessibility and both menus identify a separate lid switch")
+
+    func verify(_ enabled: Bool, refused: Bool = false) {
+        require(waitForUI({ !owner.busy }), "lid sleep command completes within the native wait")
+        let state: NSControl.StateValue = enabled ? .on : .off
+        require(owner.current.lidWanted == enabled && owner.current.lidActual == enabled &&
+                owner.lidSwitch.state == state && appItem.state == state && statusItem.state == state,
+                "all native controls show the same confirmed lid sleep state")
+        let text = refused ? "Fixture lid command refused" :
+            enabled ? "Системный сон запрещён, даже при открытой крышке" : "Сон при закрытии крышки по настройкам macOS"
+        require(owner.lidState.stringValue == text, "lid sleep feedback describes the retained policy or the refusal")
+        require(owner.lidSwitch.isEnabled && appItem.isEnabled && statusItem.isEnabled,
+                "all lid sleep entry points allow retry after completion")
+    }
+
+    verify(false)
+    owner.engine.refuseNextLidCommand = true
+    owner.lidSwitch.performClick(nil)
+    verify(false, refused: true)
+    owner.lidSwitch.performClick(nil)
+    verify(true)
+    require(!owner.current.systemWanted && !owner.current.displayWanted && owner.item.button?.title == " Крышка" &&
+            owner.summaryLabel.stringValue == "Mac под защитой", "lid-only does not select either neighboring switch")
+    owner.displaySwitch.performClick(nil)
+    verify(true)
+    require(owner.sleepSwitch.state == .on && owner.displaySwitch.state == .on, "display and idle protection combine with lid protection")
+
+    owner.engine.refuseNextLidCommand = true
+    require(app.sendAction(appItem.action!, to: appItem.target, from: appItem), "app menu routes lid sleep disable")
+    verify(true, refused: true)
+    require(app.sendAction(appItem.action!, to: appItem.target, from: appItem), "app menu retries lid sleep disable")
+    verify(false)
+    require(owner.sleepSwitch.state == .on && owner.displaySwitch.state == .on, "lid-off leaves display and idle protection on")
+
+    require(app.sendAction(statusItem.action!, to: statusItem.target, from: statusItem), "status menu routes lid sleep enable")
+    verify(true)
+    owner.sleepSwitch.performClick(nil)
+    verify(true)
+    require(owner.sleepSwitch.state == .off && owner.displaySwitch.state == .off, "idle-off leaves the independent lid switch on")
+    owner.lidSwitch.performClick(nil)
+    verify(false)
+    if !CommandLine.arguments.contains("--readiness-only") {
+        try captureNative(owner.window.contentView!, "lid-sleep-off")
+    }
+}
+
 @main enum PrivateUIHarness {
     static func main() throws {
         setbuf(stdout, nil)
@@ -63,9 +119,12 @@ func captureNative(_ view: NSView, _ name: String) throws {
         owner.startAutomaticLock()
         spinUntil { owner.lockController.state.ready }
         try uiTests(runTerminationRegression: false)
+        // Reapply the owner's state after the shortcut test restores the application menu.
+        owner.render()
+        try lidSleepAcceptance(owner, app: app)
         if !CommandLine.arguments.contains("--readiness-only") { try timedUIAcceptance() }
         let controls = walk(owner.window.contentView!).compactMap { $0 as? NSSwitch }
-        require(controls.count == 3, "dependent power switches and separate automatic lock control")
+        require(controls.count == 4, "four native switches for idle, lid, display and automatic lock")
         let labels = walk(owner.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
         require(!labels.contains { $0.contains("VPN") || $0.contains("Cisco") }, "native window has no VPN status or settings")
         require(owner.window.toolbar != nil && owner.window.contentMinSize == NSSize(width: 520, height: 360), "compact minimum content size and native resizing preserved")
@@ -84,8 +143,8 @@ func captureNative(_ view: NSView, _ name: String) throws {
         owner.engine.deferCompletion = false
         require(owner.summaryIcon.image != nil && owner.summaryIcon.symbolName == "moon.stars.fill",
                 "window retains its status icon and confirmed summary")
-        require(walk(owner.window.contentView!).compactMap { $0 as? NSImageView }.count >= 4,
-                "summary and all three control symbols are present")
+        require(walk(owner.window.contentView!).compactMap { $0 as? NSImageView }.count >= 5,
+                "summary and all four control symbols are present")
         let readinessOnly = CommandLine.arguments.contains("--readiness-only")
 
         require(owner.current.displayWanted && owner.current.systemWanted && owner.sleepSwitch.state == .on,
@@ -104,24 +163,25 @@ func captureNative(_ view: NSView, _ name: String) throws {
                 "sleep menu disables dependent display protection")
         owner.displaySwitch.performClick(nil); drain()
         owner.allButton.performClick(nil); drain()
-        require(!owner.current.systemWanted && !owner.current.displayWanted && !owner.lockController.state.enabled && owner.allButton.title == "Включить всё", "combined action disables all three features")
+        require(!owner.current.systemWanted && !owner.current.displayWanted && !owner.current.lidWanted && !owner.lockController.state.enabled && owner.allButton.title == "Включить всё", "combined action disables all four features")
         owner.allButton.performClick(nil); drain()
-        require(owner.current.systemWanted && owner.current.displayWanted && owner.lockController.state.enabled && owner.allButton.title == "Выключить всё", "combined action enables all three features")
+        require(owner.current.systemWanted && owner.current.displayWanted && owner.current.lidWanted && owner.lockController.state.enabled && owner.allButton.title == "Выключить всё", "combined action enables all four features")
         owner.perform("all-off"); drain()
         owner.permissionReady = false; owner.render()
-        require(!owner.sleepSwitch.isEnabled && !owner.displaySwitch.isEnabled && !owner.allButton.isEnabled && !owner.setupRow.isHidden,
+        require(!owner.sleepSwitch.isEnabled && !owner.displaySwitch.isEnabled && !owner.lidSwitch.isEnabled && !owner.allButton.isEnabled && !owner.setupRow.isHidden,
                 "first-run permission state disables both dependent protections and exposes setup")
         owner.item.menu!.update()
-        require(owner.item.menu!.item(withTag: 2)?.isEnabled == false && owner.item.menu!.item(withTag: 3)?.isEnabled == false,
+        require(owner.item.menu!.item(withTag: 2)?.isEnabled == false && owner.item.menu!.item(withTag: 3)?.isEnabled == false &&
+                owner.item.menu!.item(withTag: 6)?.isEnabled == false,
                 "native menu validation preserves missing-permission guards")
         let noPermissionCommands = owner.engine.fixtureCommands.count
         let noPermissionPolicy = lockBackend.value
-        owner.perform("sleep-on"); owner.perform("display-on"); owner.perform("all-on")
+        owner.perform("sleep-on"); owner.perform("display-on"); owner.perform("lid-on"); owner.perform("all-on")
         require(owner.engine.fixtureCommands.count == noPermissionCommands && lockBackend.value == noPermissionPolicy &&
                 owner.setupError != nil, "direct enable commands cannot bypass permission or start lock policy changes")
         owner.setupError = nil; owner.permissionReady = true
         owner.restorePower(system: false, display: true); drain()
-        require(owner.current.systemWanted && owner.current.displayWanted && !owner.lockController.state.enabled,
+        require(owner.current.systemWanted && owner.current.displayWanted && !owner.current.lidWanted && !owner.lockController.state.enabled,
                 "startup normalizes legacy display-only preferences without enabling lock policy")
         owner.perform("all-off"); drain()
         UIHarnessEnvironment.defaults.set(true, forKey: "KeepDisplayAwake")

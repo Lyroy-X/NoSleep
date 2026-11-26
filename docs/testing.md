@@ -68,3 +68,11 @@ Manual sleep/wake, lid closure, first administrative setup, physical process int
 The release CI found a native trailing-edge difference on macOS 15.7.9/Swift 6.1.2. An isolated local small-switch case reproduced a 10-point error before the fix; timer groups now fill their width just like the lock group. The retained alignment assertion also exercises regular/small/mini sizes and widths 520/600/700.
 
 Idle duration actions use the native timer SF Symbol and the localized “Таймер” label; focused native checks cover disabled, running and completed states. The modal fixture validates the AppKit Return binding by activating its configured native default cell (physical keyboard delivery requires desktop focus and is not claimed); Escape still exercises the production local event monitor. This avoids depending on a background fixture stealing the user’s foreground application.
+
+## Closed-lid sleep control 4.2.0
+
+The native fixture exercises the separate window switch and both menus against simulated power changes. It checks combined and independent operation, confirmed on/off feedback, both command refusals with retry, and the existing permission, display and timer paths. The engine fixture also checks migration, owned recovery and leaving external overrides in place.
+
+The watchdog regression test checks recovery without a transient warning, visible refusal and retry, and expiry at the five-minute boundary. The instrumented fixture also checks the raw reset event. Faulty copies that publish early feedback or drop the diagnostic event must fail.
+
+Physical acceptance requires a MacBook and explicit authorization. With an external display disconnected, confirm the Mac stays awake when closed with protection on. Turn protection off and confirm closing the lid follows the normal macOS sleep policy. Record power source, macOS version and sleep/wake evidence. Real power, first administrative setup, shutdown/restart and downloaded-app Gatekeeper remain separate manual checks.

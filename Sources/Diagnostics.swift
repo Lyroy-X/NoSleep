@@ -13,6 +13,8 @@ struct DiagnosticFacts: Codable, Equatable {
     var sleepActual: Bool?
     var displayWanted: Bool?
     var displayActual: Bool?
+    var lidWanted: Bool?
+    var lidActual: Bool?
     var issue: IssueCode?
     var number: Int?
 }

@@ -1,0 +1,28 @@
+[
+  {
+    "behavior": "The closed-lid sleep policy is explicit and consistent across AppKit controls, with confirmed state and retry after refusal",
+    "mode": "new-capability",
+    "productionPaths": [
+      "Sources/ApplicationMenu.swift",
+      "Sources/Diagnostics.swift",
+      "Sources/PowerPresentation.swift"
+    ],
+    "tests": [
+      "Sources/UITests.swift",
+      "Sources/LidProtectionTests.swift",
+      "Sources/DiagnosticTests.swift",
+      "tests/ui_harness/Entry.swift",
+      "tests/ui_harness/Stubs.swift"
+    ]
+  },
+  {
+    "behavior": "The watchdog retains raw power diagnostics and publishes the final confirmed recovery or refusal to the window and both menus",
+    "mode": "regression",
+    "productionPaths": [
+      "Sources/NoSleep.swift"
+    ],
+    "tests": [
+      "Sources/TimedProtectionTests.swift"
+    ]
+  }
+]

@@ -16,9 +16,12 @@ def wait(predicate, description, timeout=10):
     raise AssertionError(description+' '+str(read('state.json'))+' '+str(read('ui.json')))
 def command(value):
     subprocess.run([str(exe),'--command',value],check=True)
-def flags(s,d):
+def flags(s,d,lid=False):
     v=read('state.json')
-    return v.get('systemWanted')==s and v.get('systemActual')==s and v.get('displayWanted')==d and v.get('displayActual')==d and not v.get('error')
+    return (v.get('systemWanted')==s and v.get('systemActual')==s and
+            v.get('displayWanted')==d and v.get('displayActual')==d and
+            v.get('lidWanted')==lid and v.get('lidActual')==lid and
+            not v.get('error') and not v.get('lidError'))
 started_at=time.time()
 wait(lambda:bool(read('state.json').get('pid')) and read('state.json').get('updatedAt',0)>started_at,'fresh live application state')
 command('all-off'); wait(lambda:flags(False,False),'both protections OFF')
@@ -39,6 +42,9 @@ command('hide');wait(lambda:read('ui.json').get('windowVisible')==False,'closing
 assert flags(True,True)
 subprocess.run(['/usr/bin/open',str(app)],check=True)
 wait(lambda:read('ui.json').get('windowVisible')==True,'opening existing app reopens control window')
+command('lid-on');wait(lambda:flags(True,True,True),'lid protection combines with both existing protections')
+command('lid-off');wait(lambda:flags(True,True),'lid-off keeps idle and display protection')
+command('lid-on');wait(lambda:flags(True,True,True),'lid protection can be restored')
 started=time.monotonic()
 subprocess.run(['/usr/bin/sudo','-n','/usr/bin/pmset','-a','disablesleep','0'],check=True)
 def restored():
@@ -50,10 +56,10 @@ command('quit');pid=read('state.json')['pid']
 def gone2():
     try:os.kill(pid,0);return False
     except ProcessLookupError:return True
-wait(gone2,'quit after both protections enabled')
+wait(gone2,'quit after all power protections enabled')
 text=subprocess.check_output(['/usr/bin/pmset','-g'],text=True)
 assert re.search(r'SleepDisabled\s+0',text),text
 results.append('quit restores normal system sleep')
 subprocess.run(['/usr/bin/open',str(app)],check=True)
-wait(lambda:read('state.json').get('pid')!=pid and flags(True,True),'relaunch restores selected protections')
+wait(lambda:read('state.json').get('pid')!=pid and flags(True,True,True),'relaunch restores selected protections')
 (data/'live-test-results.json').write_text(json.dumps({'passed':results},ensure_ascii=False,indent=2))

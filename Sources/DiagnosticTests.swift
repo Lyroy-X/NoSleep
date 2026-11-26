@@ -9,6 +9,12 @@ func diagnosticStreamingTests() throws {
     let record = DiagnosticRecord(at: time, kind: .launch, facts: DiagnosticFacts(number: 7))
     let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
     let clean = try encoder.encode(record)
+    let legacy = try JSONDecoder().decode(DiagnosticRecord.self, from: clean)
+    assert(legacy.facts.lidWanted == nil && legacy.facts.lidActual == nil)
+    let lidReset = DiagnosticFacts(sleepWanted: true, sleepActual: true, lidWanted: true, lidActual: false)
+    let readback = try JSONDecoder().decode(DiagnosticFacts.self, from: encoder.encode(lidReset))
+    assert(readback == lidReset && readback.sleepActual == true && readback.lidActual == false,
+           "Diagnostics distinguish raw lid reset from active idle protection")
     // Valid JSON across a 64-KiB boundary, oversized line, and a final line without newline.
     var input = Data(repeating: 10, count: DiagnosticStreaming.chunkLimit - 40)
     input.append(clean); input.append(Data(repeating: 32, count: 1800)); input.append(10)

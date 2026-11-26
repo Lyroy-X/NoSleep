@@ -27,6 +27,9 @@ func uiTests(runTerminationRegression: Bool = true) throws {
     assert(!titles.contains { $0.contains("VPN") || $0.contains("Cisco") })
     let controls = menu.items.first { $0.title == "Управление" }!.submenu!
     assert(controls.item(withTag: 22)?.action == #selector(MenuApp.toggleSleep))
+    assert(controls.item(withTag: 22)?.title == "Mac не засыпает")
+    assert(controls.item(withTag: 26)?.action == #selector(MenuApp.toggleLid))
+    assert(controls.item(withTag: 26)?.title == "Не усыплять Mac с закрытой крышкой")
     assert(controls.item(withTag: 23)?.action == #selector(MenuApp.toggleDisplay))
     assert(controls.item(withTag: 24)?.action == #selector(MenuApp.toggleLock))
     assert(controls.item(withTag: 25)?.action == #selector(MenuApp.toggleAll))
@@ -97,10 +100,10 @@ func compactNativeAcceptance(_ owner: MenuApp) throws {
     require(waitForUI({ !owner.busy }), "completion arrives within the bounded native wait")
     require(!owner.busy && owner.allButton.isEnabled, "completed action restores native controls")
     owner.engine.deferCompletion = false
-    require(owner.sleepSwitch.accessibilityLabel() == "Mac не засыпает" && owner.displaySwitch.accessibilityLabel() == "Экран не гаснет", "independent native switches retain assistive labels")
+    require(owner.sleepSwitch.accessibilityLabel() == "Mac не засыпает" && owner.displaySwitch.accessibilityLabel() == "Экран не гаснет", "native switches expose descriptive assistive labels")
     require(owner.exportButton.accessibilityLabel() == "Сохранить диагностику NoSleep", "report toolbar has a meaningful assistive name")
     owner.perform("all-off")
-    require(waitForUI({ !owner.busy }), "keyboard fixture begins with all three protections off")
+    require(waitForUI({ !owner.busy }), "keyboard fixture begins with all protections off")
     owner.current = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
     owner.render()
     let shortcut = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: 0,

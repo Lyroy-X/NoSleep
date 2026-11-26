@@ -15,7 +15,13 @@ enum UIHarnessEnvironment {
 struct LiveState {
     var systemWanted: Bool, systemActual: Bool, displayWanted: Bool, displayActual: Bool
     var error: String?
-    var statusTitle: String { error != nil || (systemWanted && !systemActual) || (displayWanted && !displayActual) ? " !" : systemWanted && systemActual ? " ON" : displayWanted && displayActual ? " Экран" : " OFF" }
+    var lidAvailable = true, lidWanted = false, lidActual = false, lidOwned = false
+    var lidError: String?
+    var statusTitle: String {
+        if error != nil || lidError != nil || (lidWanted && !lidActual) || (systemWanted && !systemActual) || (displayWanted && !displayActual) { return " !" }
+        if lidWanted && lidActual && !systemWanted { return " Крышка" }
+        return systemWanted && systemActual ? " ON" : displayWanted && displayActual ? " Экран" : " OFF"
+    }
 }
 struct PowerError: LocalizedError { let message: String; var errorDescription: String? { message } }
 final class MacPower {
@@ -36,7 +42,9 @@ final class GuardEngine {
     let protection: HarnessProtection
     let queue = DispatchQueue(label: "NoSleep.UIHarness.unused-power")
     var changed: ((LiveState) -> Void)?
+    var observed: ((LiveState) -> Void)?
     var fixtureActionsAllowed = false, deferCompletion = false
+    var refuseNextLidCommand = false
     private(set) var fixtureCommands: [String] = []
     private(set) var fixtureShutdownCount = 0
     var fixtureRejectShutdown = false
@@ -68,16 +76,26 @@ final class GuardEngine {
     }
     func act(_ command: String, save: Bool = true, completed: (() -> Void)? = nil) {
         guard fixtureActionsAllowed, Thread.isMainThread, pendingCompletion == nil else { uiForbidden("power action without explicit fixture opt-in") }
-        switch command {
-        case "all-on": fixtureState.systemWanted = true; fixtureState.displayWanted = true
-        case "all-off": fixtureState.systemWanted = false; fixtureState.displayWanted = false
-        case "sleep-on": fixtureState.systemWanted = true
-        case "sleep-off": fixtureState.systemWanted = false; fixtureState.displayWanted = false
-        case "display-on": fixtureState.systemWanted = true; fixtureState.displayWanted = true
-        case "display-off": fixtureState.displayWanted = false
-        default: uiForbidden("unsupported in-memory fixture power action")
+        if refuseNextLidCommand && (command == "lid-on" || command == "lid-off") {
+            refuseNextLidCommand = false
+            fixtureState.lidError = "Fixture lid command refused"
+        } else {
+            switch command {
+            case "all-on": fixtureState.systemWanted = true; fixtureState.displayWanted = true; fixtureState.lidWanted = true
+            case "all-off": fixtureState.systemWanted = false; fixtureState.displayWanted = false; fixtureState.lidWanted = false
+            case "lid-on": fixtureState.lidWanted = true
+            case "lid-off": fixtureState.lidWanted = false
+            case "sleep-on": fixtureState.systemWanted = true
+            case "sleep-off": fixtureState.systemWanted = false; fixtureState.displayWanted = false
+            case "display-on": fixtureState.systemWanted = true; fixtureState.displayWanted = true
+            case "display-off": fixtureState.displayWanted = false
+            default: uiForbidden("unsupported in-memory fixture power action")
+            }
+            fixtureState.systemActual = fixtureState.systemWanted; fixtureState.displayActual = fixtureState.displayWanted
+            fixtureState.error = nil
+            fixtureState.lidActual = fixtureState.lidWanted; fixtureState.lidOwned = fixtureState.lidWanted
+            if command.hasPrefix("lid-") || command.hasPrefix("all-") { fixtureState.lidError = nil }
         }
-        fixtureState.systemActual = fixtureState.systemWanted; fixtureState.displayActual = fixtureState.displayWanted
         fixtureCommands.append(command); changed?(fixtureState)
         if deferCompletion { pendingCompletion = completed } else { completed?() }
     }
@@ -103,6 +121,7 @@ enum IssueCode: String { case commandFailed, commandTimeout, unsupportedState }
 enum DiagnosticKind { case launch, powerAction, powerState, shutdown }
 struct DiagnosticFacts {
     var sleepWanted: Bool?, sleepActual: Bool?, displayWanted: Bool?, displayActual: Bool?
+    var lidWanted: Bool?, lidActual: Bool?
     var issue: IssueCode?
     var number: Int?
 }
@@ -119,7 +138,7 @@ final class DiagnosticStore {
             if case .powerState = kind { return }
         }
         if fixturePowerActionsAllowed, case .shutdown = kind { shutdownCount += 1; return }
-        guard fixturePowerActionsAllowed, case .powerAction = kind, let index = facts.number, (0..<6).contains(index) else { uiForbidden("normal diagnostics recorder") }
+        guard fixturePowerActionsAllowed, case .powerAction = kind, let index = facts.number, (0..<8).contains(index) else { uiForbidden("normal diagnostics recorder") }
         // Deliberately in-memory: never start log files, exports or production snapshots.
         powerActionCount += 1
     }

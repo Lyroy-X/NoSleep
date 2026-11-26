@@ -95,7 +95,8 @@ def main():
         ("prerequisite-refusal", "if !active { try enable() }\n            else if try !power.blocked() { try enable() }",
          "try? enable()"),
         ("restore-refusal", "try power.setBlocked(false)", "power.releaseDisplay(); try power.setBlocked(false)"),
-        ("partial-persistence", "if save {", "if save && self.actionError == nil {"),
+        ("partial-persistence", "if save {\n                self.powerDefaults.set(",
+         "if save && self.actionError == nil {\n                self.powerDefaults.set("),
         ("missing-confirmation", " || (systemWanted && !systemActual) || (displayWanted && !displayActual)", ""),
     ]
     receipts = []

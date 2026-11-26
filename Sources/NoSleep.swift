@@ -11,6 +11,12 @@ protocol PowerControl {
     func displayHeld() -> Bool
 }
 
+protocol LidPowerControl {
+    var supportsLid: Bool { get }
+    func setLidBlocked(_ value: Bool) throws
+    func lidBlocked() throws -> Bool
+}
+
 struct PowerError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -103,7 +109,7 @@ func setupTests() throws {
     print("PASS: first-run permissions, cached-access rejection, per-user limited rule, input validation, cancellation")
 }
 
-final class MacPower: PowerControl {
+final class MacPower: PowerControl, LidPowerControl {
     private var assertion: IOPMAssertionID = 0
     private var displayAssertion: IOPMAssertionID = 0
     private func run(_ executable: String, _ arguments: [String]) throws -> String {
@@ -120,19 +126,36 @@ final class MacPower: PowerControl {
         return allowsPasswordlessPower(listing)
     }
     func setBlocked(_ value: Bool) throws {
-        _ = try run("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
-        try waitForPowerState(value) { try self.blocked() }
+        if value { try holdIdle(); return }
+        guard assertion != 0 else { return }
+        let result = IOPMAssertionRelease(assertion)
+        guard result == kIOReturnSuccess || !assertionHeld(assertion) else {
+            throw PowerError(message: "macOS не сняла защиту от сна при бездействии.")
+        }
+        assertion = 0
     }
-    func blocked() throws -> Bool {
+    func blocked() throws -> Bool { assertionHeld(assertion) }
+    var supportsLid: Bool { rootFlag("AppleClamshellState") != nil }
+    func setLidBlocked(_ value: Bool) throws {
+        _ = try run("/usr/bin/sudo", ["-n", "/usr/bin/pmset", "-a", "disablesleep", value ? "1" : "0"])
+        try waitForPowerState(value) { try self.lidBlocked() }
+    }
+    func lidBlocked() throws -> Bool {
+        guard let value = rootFlag("SleepDisabled") else {
+            throw PowerError(message: "macOS не сообщила состояние защиты крышки.")
+        }
+        return value
+    }
+    private func rootFlag(_ key: String) -> Bool? {
         let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
-        guard root != 0 else { throw PowerError(message: "Не удалось прочитать состояние сна macOS.") }
+        guard root != 0 else { return nil }
         defer { IOObjectRelease(root) }
-        guard let value = IORegistryEntryCreateCFProperty(root, "SleepDisabled" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber
-        else { throw PowerError(message: "macOS не сообщила состояние запрета сна.") }
-        return value.boolValue
+        let value = IORegistryEntryCreateCFProperty(root, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber
+        return value?.boolValue
     }
     func holdIdle() throws {
-        guard assertion == 0 else { return }
+        guard !assertionHeld(assertion) else { return }
+        releaseIdle()
         let status = IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
@@ -159,9 +182,10 @@ final class MacPower: PowerControl {
     func releaseDisplay() {
         if displayAssertion != 0 { IOPMAssertionRelease(displayAssertion); displayAssertion = 0 }
     }
-    func displayHeld() -> Bool {
-        guard displayAssertion != 0,
-              let properties = IOPMAssertionCopyProperties(displayAssertion)?.takeRetainedValue() as? [String: Any]
+    func displayHeld() -> Bool { assertionHeld(displayAssertion) }
+    private func assertionHeld(_ id: IOPMAssertionID) -> Bool {
+        guard id != 0,
+              let properties = IOPMAssertionCopyProperties(id)?.takeRetainedValue() as? [String: Any]
         else { return false }
         return (properties[kIOPMAssertionLevelKey] as? NSNumber)?.intValue == Int(kIOPMAssertionLevelOn)
     }
@@ -303,21 +327,102 @@ struct LiveState: Codable {
     var displayActual: Bool
     // Timer presentation is delivered separately; diagnostics retain their stable schema.
     var error: String?
+    var lidAvailable = false
+    var lidWanted = false
+    var lidActual = false
+    var lidOwned = false
+    var lidError: String?
     var pid: Int32 = getpid()
     var updatedAt: Double = Date().timeIntervalSince1970
     var statusTitle: String {
-        if error != nil || (systemWanted && !systemActual) || (displayWanted && !displayActual) { return " !" }
+        if error != nil || lidError != nil || (lidWanted && !lidActual) || (systemWanted && !systemActual) || (displayWanted && !displayActual) { return " !" }
+        if lidWanted && lidActual && !systemWanted { return " Крышка" }
         if systemWanted && systemActual { return " ON" }
         if displayWanted && displayActual { return " Экран" }
         return " OFF"
     }
 }
 
+/// Accessed on the power queue. Only a journaled NoSleep override can be removed.
+final class LidProtection {
+    static let selectionKey = "PreventLidSleep"
+    static let ownershipKey = "NoSleepOwnsLidOverride"
+    let power: LidPowerControl?
+    let preferences: UserDefaults
+    private(set) var active = false
+    private(set) var error: String?
+    var available: Bool { power?.supportsLid == true }
+    var owned: Bool { power != nil && preferences.bool(forKey: Self.ownershipKey) }
+    var actual: Bool { (try? power?.lidBlocked()) == true }
+
+    init(_ power: LidPowerControl?, preferences: UserDefaults) {
+        self.power = power; self.preferences = preferences
+    }
+
+    func apply(_ enabled: Bool, save: Bool) {
+        guard power != nil else { return }
+        do {
+            try setEnabled(enabled)
+            if save { preferences.set(enabled, forKey: Self.selectionKey) }
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    func restore() {
+        guard available else { return }
+        // Existing confirmed system selections included closed-lid protection.
+        if preferences.object(forKey: Self.selectionKey) == nil {
+            preferences.set(preferences.bool(forKey: "PreventSystemSleep"), forKey: Self.selectionKey)
+        }
+        apply(preferences.bool(forKey: Self.selectionKey), save: false)
+    }
+
+    func refresh() {
+        guard active && error == nil && !actual else { return }
+        apply(true, save: false)
+    }
+
+    func shutdown() throws { try setEnabled(false) }
+
+    private func setEnabled(_ enabled: Bool) throws {
+        guard let power else { return }
+        if enabled {
+            guard available else { throw PowerError(message: "На этом Mac защита крышки недоступна.") }
+            if try power.lidBlocked() {
+                guard owned else { throw PowerError(message: "Сон уже запрещён другой настройкой macOS.") }
+                active = true
+                return
+            }
+            preferences.set(true, forKey: Self.ownershipKey)
+            guard preferences.synchronize() else {
+                preferences.removeObject(forKey: Self.ownershipKey)
+                throw PowerError(message: "Не удалось сохранить состояние для восстановления сна.")
+            }
+            do {
+                try power.setLidBlocked(true)
+                guard try power.lidBlocked() else { throw PowerError(message: "macOS не подтвердила защиту крышки.") }
+                active = true
+            } catch {
+                if !active && (try? power.lidBlocked()) == false { preferences.removeObject(forKey: Self.ownershipKey) }
+                throw error
+            }
+        } else if owned {
+            if try power.lidBlocked() { try power.setLidBlocked(false) }
+            guard try !power.lidBlocked() else { throw PowerError(message: "macOS не вернула обычный сон при закрытии крышки.") }
+            preferences.removeObject(forKey: Self.ownershipKey)
+            active = false
+        }
+    }
+}
+
 final class GuardEngine {
     let protection: Protection
+    let lid: LidProtection
     let queue = DispatchQueue(label: "NoSleep.power")
     var timer: DispatchSourceTimer?
     var changed: ((LiveState) -> Void)?
+    // Record a reset before recovery without publishing it as confirmed UI state.
+    var observed: ((LiveState) -> Void)?
     private var actionError: String?
     private var pollError: String?
     private var timedPlan: TimedPowerPlan?
@@ -328,7 +433,10 @@ final class GuardEngine {
         return { let d = origin.duration(to: clock.now).components; return Double(d.seconds) + Double(d.attoseconds) / 1e18 }
     }()
     let powerDefaults: UserDefaults
-    init(_ power: PowerControl, preferences: UserDefaults = UserDefaults.standard) { protection = Protection(power); powerDefaults = preferences }
+    init(_ power: PowerControl, preferences: UserDefaults = UserDefaults.standard, lidPower: LidPowerControl? = nil) {
+        protection = Protection(power); powerDefaults = preferences
+        lid = LidProtection(lidPower ?? (power as? LidPowerControl), preferences: preferences)
+    }
     func timingState() -> TimedPowerSnapshot { timedPlan?.snapshot(now: timedNow(), failed: timedFailure) ?? TimedPowerSnapshot() }
     private func publishTiming() { timingChanged?(timingState()) }
     private func reconcileTimed(_ selection: PowerSelection, forceOff: Bool = false) throws {
@@ -349,6 +457,8 @@ final class GuardEngine {
     }
     func restoreTimers(completed: @escaping (Bool) -> Void) {
         queue.async {
+            self.lid.restore()
+            self.changed?(self.state())
             guard let data = self.powerDefaults.data(forKey: "TimedPowerBaseline") else { completed(false); return }
             do {
                 let baseline = try JSONDecoder().decode(PowerSelection.self, from: data)
@@ -419,10 +529,16 @@ final class GuardEngine {
         do { actual = try protection.power.blocked() }
         catch let failure { actual = false; error = failure.localizedDescription }
         return LiveState(systemWanted: protection.active, systemActual: actual,
-                         displayWanted: protection.displayActive, displayActual: protection.power.displayHeld(), error: error)
+                         displayWanted: protection.displayActive, displayActual: protection.power.displayHeld(), error: error,
+                         lidAvailable: lid.available, lidWanted: lid.active, lidActual: lid.actual, lidOwned: lid.owned, lidError: lid.error)
     }
     func act(_ command: String, save: Bool = true, completed: (() -> Void)? = nil) {
         queue.async {
+            if command == "lid-on" || command == "lid-off" {
+                self.lid.apply(command == "lid-on", save: save)
+                self.changed?(self.state()); completed?()
+                return
+            }
             do {
                 switch command {
                 case "sleep-on": try self.protection.enable()
@@ -440,6 +556,9 @@ final class GuardEngine {
                 self.actionError = nil
                 self.pollError = nil
             } catch { self.actionError = error.localizedDescription }
+            if command == "all-off" || (command == "all-on" && self.lid.available) {
+                self.lid.apply(command == "all-on", save: save)
+            }
             // A failed combined command may still have acquired/retained protection.
             if save {
                 self.powerDefaults.set(self.timedPlan?.baseline.system ?? self.protection.active, forKey: "PreventSystemSleep")
@@ -456,11 +575,13 @@ final class GuardEngine {
         t.setEventHandler { [weak self] in
             guard let self = self else { return }
             self.tickTimed()
-            if self.protection.active, (try? self.protection.power.blocked()) == false {
-                self.changed?(self.state())
+            let idleMissing = self.protection.active && (try? self.protection.power.blocked()) == false
+            if idleMissing || (self.lid.active && !self.lid.actual) {
+                self.observed?(self.state())
             }
             do { try self.protection.refresh(); self.pollError = nil }
             catch { self.pollError = error.localizedDescription }
+            self.lid.refresh()
             self.changed?(self.state())
         }
         timer = t; t.resume()
@@ -468,16 +589,22 @@ final class GuardEngine {
     func stop(completed: @escaping (Error?) -> Void) {
         queue.async {
             self.timer?.cancel(); self.timer = nil
-            do { try self.protection.shutdown(); if self.timedPlan != nil { self.powerDefaults.removeObject(forKey: "TimedPowerBaseline") }; self.timedPlan = nil; self.changed?(self.state()); completed(nil) }
+            do { try self.shutdownProtection(); self.changed?(self.state()); completed(nil) }
             catch { self.start(); completed(error) }
         }
     }
     func shutdownNow() throws {
         try queue.sync {
             timer?.cancel(); timer = nil
-            do { try protection.shutdown(); if timedPlan != nil { powerDefaults.removeObject(forKey: "TimedPowerBaseline") }; timedPlan = nil; changed?(state()) }
+            do { try shutdownProtection(); changed?(state()) }
             catch { start(); throw error }
         }
+    }
+    private func shutdownProtection() throws {
+        try lid.shutdown()
+        try protection.shutdown()
+        if timedPlan != nil { powerDefaults.removeObject(forKey: "TimedPowerBaseline") }
+        timedPlan = nil
     }
 }
 
@@ -503,6 +630,7 @@ func backgroundTest() throws {
 }
 
 final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate {
+    static let lidTitle = "Не усыплять Mac с закрытой крышкой"
     let engine = GuardEngine(MacPower())
     var current = LiveState(systemWanted: false, systemActual: false, displayWanted: false, displayActual: false, error: nil)
     var item: NSStatusItem!
@@ -519,6 +647,8 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     lazy var durationHistory = DurationHistory(defaults: UserDefaults.standard)
     var restoreLockButton: NSButton!
     var sleepState: NSTextField!
+    var lidSwitch: NSSwitch!
+    var lidState: NSTextField!
     var displayState: NSTextField!
     var errorLabel: NSTextField!
     var setupLabel: NSTextField!
@@ -551,6 +681,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         let state: [String: Any] = ["windowVisible": window.isVisible, "windowTitle": window.title,
                                   "statusTitle": item?.button?.title ?? current.statusTitle,
                                   "sleepChecked": sleepSwitch.state == .on, "displayChecked": displaySwitch.state == .on,
+                                  "lidChecked": lidSwitch.state == .on, "lidEnabled": lidSwitch.isEnabled,
                                   "lockChecked": lockSwitch.state == .on, "lockEnabled": lockSwitch.isEnabled,
                                   "lockText": lockState.stringValue,
                                   "errorText": errorLabel.stringValue,
@@ -669,7 +800,8 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         setupButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         body.addArrangedSubview(setupRow)
         setupLabel.widthAnchor.constraint(equalTo: setupRow.widthAnchor).isActive = true
-        sleepSwitch = switchControl("Mac не засыпает", action: #selector(toggleSleep))
+        sleepSwitch = switchControl(TimedFeature.system.title, action: #selector(toggleSleep))
+        lidSwitch = switchControl(Self.lidTitle, action: #selector(toggleLid))
         displaySwitch = switchControl("Экран не гаснет", action: #selector(toggleDisplay))
         sleepDurationButton = NSButton(title: "Таймер", target: self, action: #selector(showSleepDuration))
         displayDurationButton = NSButton(title: "Таймер", target: self, action: #selector(showDisplayDuration))
@@ -695,7 +827,9 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         lockControls.distribution = .fill
         lockControls.widthAnchor.constraint(equalToConstant: 94).isActive = true
         sleepState = uiLabel("Проверяю…", secondary: true); displayState = uiLabel("Проверяю…", secondary: true)
-        let power = card([row("Mac не засыпает", detail: sleepState, symbol: "laptopcomputer", control: sleepControls), separator(),
+        lidState = uiLabel("Проверяю…", secondary: true)
+        let power = card([row(TimedFeature.system.title, detail: sleepState, symbol: "moon", control: sleepControls), separator(),
+                          row(Self.lidTitle, detail: lidState, symbol: "laptopcomputer", control: lidSwitch), separator(),
                           row("Экран не гаснет", detail: displayState, symbol: "display", control: displayControls), separator(),
                           row("Не блокировать автоматически", detail: lockState, symbol: "lock.open", control: lockControls)])
         body.addArrangedSubview(power); body.setCustomSpacing(20, after: power)
@@ -720,7 +854,8 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
     func statusMenu() -> NSMenu {
         let menu = NSMenu(); menu.autoenablesItems = false
         menu.addItem(NSMenuItem(title: "Открыть NoSleep", action: #selector(showWindow), keyEquivalent: "")); menu.addItem(.separator())
-        let sleepMenu = NSMenuItem(title: "Mac не засыпает", action: #selector(toggleSleep), keyEquivalent: ""); sleepMenu.tag = 2; menu.addItem(sleepMenu)
+        let sleepMenu = NSMenuItem(title: TimedFeature.system.title, action: #selector(toggleSleep), keyEquivalent: ""); sleepMenu.tag = 2; menu.addItem(sleepMenu)
+        let lidMenu = NSMenuItem(title: Self.lidTitle, action: #selector(toggleLid), keyEquivalent: ""); lidMenu.tag = 6; menu.addItem(lidMenu)
         let displayMenu = NSMenuItem(title: "Экран не гаснет", action: #selector(toggleDisplay), keyEquivalent: ""); displayMenu.tag = 3; menu.addItem(displayMenu)
         let lockMenu = NSMenuItem(title: "Не блокировать автоматически", action: #selector(toggleLock), keyEquivalent: ""); lockMenu.tag = 4; menu.addItem(lockMenu)
         let allMenu = NSMenuItem(title: "Выключить всё", action: #selector(toggleAll), keyEquivalent: ""); allMenu.tag = 5; menu.addItem(allMenu)
@@ -739,6 +874,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         item.menu = statusMenu()
         startAutomaticLock()
         engine.timingChanged = { [weak self] snapshot in DispatchQueue.main.async { self?.timedState = snapshot; self?.render() } }
+        engine.observed = { [weak self] state in self?.writeState(state) }
         engine.changed = { [weak self] state in
             guard let self = self else { return }; self.writeState(state)
             let lostPermission = state.error != nil && (self.engine.protection.power as? MacPower)?.canControlSleep() == false
@@ -756,7 +892,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
                 }
             } else if command == "export-test" { self.saveDiagnostics(to: self.dataDir.appendingPathComponent("last-support-test.zip")) }
             else if command == "toggle-all" { self.toggleAll() }
-            else if ["sleep-on", "sleep-off", "display-on", "display-off", "all-off", "all-on", "lock-on", "lock-off"].contains(command) { self.perform(command) }
+            else { self.perform(command) }
         }
         let wantedSystem = UserDefaults.standard.object(forKey: "PreventSystemSleep") == nil || UserDefaults.standard.bool(forKey: "PreventSystemSleep")
         let wantedDisplay = UserDefaults.standard.bool(forKey: "KeepDisplayAwake")
@@ -779,33 +915,40 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         engine.restoreTimers { [weak self] recovered in DispatchQueue.main.async {
             guard let self else { return }
             if recovered || !(system || display) { self.busy = false; self.render() }
-            else { self.performPower(display ? "all-on" : "sleep-on") }
+            else { self.performPower(display ? "display-on" : "sleep-on") }
         } }
     }
     func writeState(_ state: LiveState) {
         diagnostics.snapshot(state)
         diagnostics.record(.powerState, DiagnosticFacts(sleepWanted: state.systemWanted, sleepActual: state.systemActual,
-                             displayWanted: state.displayWanted, displayActual: state.displayActual, issue: state.error == nil ? nil : .commandFailed))
+                             displayWanted: state.displayWanted, displayActual: state.displayActual,
+                             lidWanted: state.lidWanted, lidActual: state.lidActual,
+                             issue: state.error == nil && state.lidError == nil ? nil : .commandFailed))
     }
     func render() {
         guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.render() }; return }
         guard window != nil, item != nil else { return }
         let summary = PowerPresentation.make(systemWanted: current.systemWanted, systemActual: current.systemActual,
             displayWanted: current.displayWanted, displayActual: current.displayActual, permissionReady: permissionReady,
-            busy: busy, hasError: setupError != nil || current.error != nil,
+            busy: busy, hasError: setupError != nil || current.error != nil || current.lidError != nil || (current.lidWanted && !current.lidActual),
             lockEnabled: lockController.state.enabled, lockRecovery: lockController.state.recovery,
-            lockIssue: lockController.state.issue?.localizedDescription)
+            lockIssue: lockController.state.issue?.localizedDescription, lidActive: current.lidWanted && current.lidActual)
         InterfaceMotion.text(summaryLabel, summary.title); InterfaceMotion.text(summaryDetail, summary.detail)
         summaryIcon.update(summary)
-        let anyOwned = current.systemWanted || current.displayWanted || lockController.state.enabled || lockController.requiresRestoration
-        allButton.title = aggregateTitle(system: current.systemWanted || lockController.state.enabled || lockController.requiresRestoration, display: current.displayWanted)
+        let systemOwned = current.systemWanted || current.lidOwned || current.lidWanted ||
+            lockController.state.enabled || lockController.requiresRestoration
+        let anyOwned = systemOwned || current.displayWanted
+        allButton.title = aggregateTitle(system: systemOwned, display: current.displayWanted)
         allButton.isEnabled = !busy && (anyOwned || (permissionReady == true && lockController.state.ready))
         item.menu?.item(withTag: 5)?.title = allButton.title; item.menu?.item(withTag: 5)?.isEnabled = allButton.isEnabled
         InterfaceMotion.set(sleepSwitch, on: current.systemWanted)
+        InterfaceMotion.set(lidSwitch, on: current.lidWanted)
         InterfaceMotion.set(displaySwitch, on: current.displayWanted)
         sleepSwitch.isEnabled = !busy && (current.systemWanted || permissionReady == true)
         displaySwitch.isEnabled = !busy && (current.displayWanted || permissionReady == true)
-        sleepSwitch.toolTip = "Для долгих загрузок и расчётов; экран может гаснуть"
+        lidSwitch.isEnabled = !busy && (current.lidOwned || current.lidWanted || (current.lidAvailable && permissionReady == true))
+        sleepSwitch.toolTip = "Предотвращает сон от бездействия"
+        lidSwitch.toolTip = "Защита крышки блокирует системный сон и действует также при открытой крышке"
         displaySwitch.toolTip = "Для презентаций и чтения; защита сна включится автоматически"
         let lock = lockController.state
         InterfaceMotion.set(lockSwitch, on: lock.enabled)
@@ -820,13 +963,27 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         setupRow.isHidden = permissionReady == true; setupLabel.isHidden = setupRow.isHidden; setupButton.isHidden = setupRow.isHidden
         setupButton.isEnabled = permissionReady == false && !busy
         setupLabel.stringValue = permissionReady == nil ? "Проверяю готовность NoSleep…" : "Один раз разрешите NoSleep управлять защитой сна. Подтверждение macOS запрашивается только при настройке."
-        var sleepText = current.systemWanted ? (current.systemActual ? "Защита сна работает" : "Не удалось подтвердить защиту сна") : (current.systemActual ? "Сон запрещён другой настройкой macOS" : "Выключено: сон разрешён")
+        var sleepText: String
+        switch (current.systemWanted, current.systemActual) {
+        case (true, true): sleepText = "Защита от сна при бездействии включена"
+        case (true, false): sleepText = "Не удалось подтвердить защиту сна"
+        case (false, true): sleepText = "Сон запрещён другой настройкой macOS"
+        case (false, false): sleepText = "Выключено: обычный сон при бездействии"
+        }
+        var lidText: String
+        if permissionReady == nil { lidText = "Проверяю…" }
+        else if let error = current.lidError { lidText = error }
+        else if current.lidWanted { lidText = current.lidActual ? "Системный сон запрещён, даже при открытой крышке" : "Не удалось подтвердить защиту крышки" }
+        else if current.lidActual { lidText = "Сон запрещён другой настройкой macOS" }
+        else { lidText = current.lidAvailable ? "Сон при закрытии крышки по настройкам macOS" : "Доступно на Mac с крышкой" }
         var displayText = current.displayWanted ? (current.displayActual ? "Экран остаётся включённым" : "Не удалось подтвердить защиту экрана") : "Выключено: обычный режим экрана"
         if let pending = pendingPowerAction {
             if ["sleep-on", "display-on", "all-on"].contains(pending) { sleepText = "Включаю защиту сна…" }
             if ["sleep-off", "all-off"].contains(pending) { sleepText = "Возвращаю обычный режим сна…" }
             if ["display-on", "all-on"].contains(pending) { displayText = "Включаю защиту экрана…" }
             if ["display-off", "sleep-off", "all-off"].contains(pending) { displayText = "Возвращаю обычный режим экрана…" }
+            if ["lid-on", "all-on"].contains(pending) && current.lidAvailable { lidText = "Включаю защиту крышки…" }
+            if ["lid-off", "all-off"].contains(pending) && current.lidOwned { lidText = "Возвращаю сон при закрытии крышки…" }
         }
         for (feature, button) in [(TimedFeature.system, sleepDurationButton!), (.display, displayDurationButton!)] {
             button.isEnabled = !busy && permissionReady == true
@@ -846,13 +1003,15 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         }
         // Commit final text once: unchanged countdown labels must not restart motion.
         InterfaceMotion.text(sleepState, sleepText); InterfaceMotion.text(displayState, displayText)
+        InterfaceMotion.text(lidState, lidText)
+        lidState.textColor = pendingPowerAction == nil && (current.lidError != nil || (current.lidWanted && !current.lidActual)) ? .systemRed : .secondaryLabelColor
         sleepState.textColor = pendingPowerAction == nil && current.systemWanted && !current.systemActual ? .systemRed : .secondaryLabelColor
         displayState.textColor = pendingPowerAction == nil && current.displayWanted && !current.displayActual ? .systemRed : .secondaryLabelColor
         InterfaceMotion.text(errorLabel, setupError ?? (permissionReady == false && current.error != nil ? "Для защиты сна нажмите «Настроить NoSleep»." : current.error.map { "Не выполнено: \($0)" } ?? ""))
         errorLabel.isHidden = errorLabel.stringValue.isEmpty
         exportButton.isEnabled = !exporting
         if let menu = NSApplication.shared.mainMenu?.items.first(where: { $0.title == "Управление" })?.submenu {
-            for (tag, control) in [(22, sleepSwitch!), (23, displaySwitch!), (24, lockSwitch!)] {
+            for (tag, control) in [(22, sleepSwitch!), (23, displaySwitch!), (24, lockSwitch!), (26, lidSwitch!)] {
                 menu.item(withTag: tag)?.state = control.state; menu.item(withTag: tag)?.isEnabled = control.isEnabled
             }
             menu.item(withTag: 25)?.title = allButton.title; menu.item(withTag: 25)?.isEnabled = allButton.isEnabled
@@ -864,14 +1023,16 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         item.menu?.item(withTag: 2)?.state = sleepSwitch.state; item.menu?.item(withTag: 2)?.isEnabled = sleepSwitch.isEnabled
         item.menu?.item(withTag: 3)?.state = displaySwitch.state; item.menu?.item(withTag: 3)?.isEnabled = displaySwitch.isEnabled
         item.menu?.item(withTag: 4)?.state = lockSwitch.state; item.menu?.item(withTag: 4)?.isEnabled = lockSwitch.isEnabled
+        item.menu?.item(withTag: 6)?.state = lidSwitch.state; item.menu?.item(withTag: 6)?.isEnabled = lidSwitch.isEnabled
         writeUI()
     }
     func perform(_ command: String) {
         guard !busy, !handlingTermination else { return }
-        guard ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off", "lock-on", "lock-off"].contains(command) else { return }
+        guard ["sleep-on", "sleep-off", "display-on", "display-off", "lid-on", "lid-off", "all-on", "all-off", "lock-on", "lock-off"].contains(command) else { return }
         if ["sleep-on", "display-on", "all-on"].contains(command), permissionReady != true {
             setupError = "Для защиты сна и экрана сначала настройте NoSleep."; render(); return
         }
+        if command == "lid-on", permissionReady != true || !current.lidAvailable { render(); return }
         if command == "all-on", !lockController.state.ready { render(); return }
         if command.hasPrefix("lock-") || command.hasPrefix("all-") {
             busy = true; render()
@@ -885,7 +1046,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         busy = true; performPower(command)
     }
     func performPower(_ command: String) {
-        diagnostics.record(.powerAction, DiagnosticFacts(number: ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off"].firstIndex(of: command)))
+        diagnostics.record(.powerAction, DiagnosticFacts(number: ["sleep-on", "sleep-off", "display-on", "display-off", "all-on", "all-off", "lid-on", "lid-off"].firstIndex(of: command)))
         pendingPowerAction = command
         render(); engine.act(command) { [weak self] in DispatchQueue.main.async {
             self?.pendingPowerAction = nil; self?.busy = false; self?.render()
@@ -954,10 +1115,11 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         restorePower(system: true, display: UserDefaults.standard.bool(forKey: "KeepDisplayAwake"))
     }
     @objc func toggleSleep() { perform(current.systemWanted ? "sleep-off" : "sleep-on") }
+    @objc func toggleLid() { perform(current.lidWanted || current.lidOwned ? "lid-off" : "lid-on") }
     @objc func toggleDisplay() { perform(current.displayWanted ? "display-off" : "display-on") }
     @objc func toggleLock() { perform(lockController.state.enabled ? "lock-off" : "lock-on") }
     @objc func restoreAutomaticLock() { perform("lock-off") }
-    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted || lockController.requiresRestoration ? "all-off" : "all-on") }
+    @objc func toggleAll() { perform(current.systemWanted || current.displayWanted || current.lidOwned || current.lidWanted || lockController.requiresRestoration ? "all-off" : "all-on") }
     @objc func showSleepDuration() { showDuration(.system, from: sleepDurationButton) }
     @objc func showDisplayDuration() { showDuration(.display, from: displayDurationButton) }
     func showDuration(_ feature: TimedFeature, from button: NSButton) {
@@ -998,7 +1160,7 @@ final class MenuApp: NSObject, NSApplicationDelegate, NSWindowDelegate, NSToolba
         let rows: [NSView] = [
             uiLabel("Когда включать защиту", size: 14, weight: .semibold),
             uiLabel("Загрузка или расчёт", weight: .semibold),
-            uiLabel("Включите «Mac не засыпает». Экран может гаснуть.", secondary: true),
+            uiLabel("Включите «\(TimedFeature.system.title)». Экран может гаснуть.", secondary: true),
             uiLabel("Презентация или чтение", weight: .semibold),
             uiLabel("Включите «Экран не гаснет». Защита сна включится сама.", secondary: true),
             uiLabel("Нейронка работает с интерфейсом", weight: .semibold),
@@ -1158,6 +1320,7 @@ do {
         try terminationTests()
         try automaticLockTests()
         try timedProtectionTests()
+        try lidProtectionTests()
     } else if let index = CommandLine.arguments.firstIndex(of: "--command"), index + 1 < CommandLine.arguments.count {
         DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.robert.NoSleep.command"), object: nil, userInfo: ["command": CommandLine.arguments[index + 1]], deliverImmediately: true)
     } else if CommandLine.arguments.contains("--verify-setup-script") {
@@ -1192,9 +1355,9 @@ do {
         defer { try? control.disable() }
         for n in 1...2 {
             try control.enable()
-            print("ON \(n): SleepDisabled=1, idle assertion held")
+            print("ON \(n): idle assertion held")
             try control.disable()
-            print("OFF \(n): SleepDisabled=0, idle assertion released")
+            print("OFF \(n): idle assertion released")
         }
         try control.enable()
         try control.power.setBlocked(false)

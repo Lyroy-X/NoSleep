@@ -23,8 +23,13 @@ def main():
              + source[source.index("struct LiveState:"):source.index("func backgroundTest()")])
     timed = (ROOT / "Sources/TimedProtection.swift").read_text()
     tests = (ROOT / "Sources/TimedProtectionTests.swift").read_text()
+    lid_tests = ROOT / "Sources/LidProtectionTests.swift"
     mutations = [
         ("unmodified", "", ""),
+        ("transient-warning", "self.observed?(self.state())",
+         "self.observed?(self.state()); self.changed?(self.state())"),
+        ("dropped-reset-diagnostics", "self.observed?(self.state())", ""),
+        ("clear-unowned-lid-override", "} else if owned {", "} else {"),
         ("early-expiry", "now < $0.value.deadline", "now >= $0.value.deadline"),
         ("unbounded-history", "static let limit = 5", "static let limit = 500"),
         ("corrupt-minute-refusal", "minutes <= 59", "minutes <= 999"),
@@ -38,13 +43,14 @@ def main():
     receipts = []
     with tempfile.TemporaryDirectory(prefix="native-", dir=output) as directory:
         case = Path(directory)
-        (case / "Tests.swift").write_text(tests + '\n@main enum Run { static func main() throws { if CommandLine.arguments.count == 3 { timedPersistencePhase(CommandLine.arguments[1], suite: CommandLine.arguments[2]) } else { try timedProtectionTests() } } }\n')
+        (case / "Tests.swift").write_text(tests + '\n' + lid_tests.read_text() +
+            '\n@main enum Run { static func main() throws { if CommandLine.arguments.count == 3 { timedPersistencePhase(CommandLine.arguments[1], suite: CommandLine.arguments[2]) } else { try lidProtectionTests(); try timedProtectionTests() } } }\n')
         combined = timed + "\n" + model
         for name, before, after in mutations:
             if before:
                 assert combined.count(before) == 1, name
             (case / "Model.swift").write_text(combined.replace(before, after, 1) if before else combined)
-            compiled = subprocess.run(["swiftc", "-module-cache-path", str(output / "module-cache"),
+            compiled = subprocess.run(["swiftc", "-D", "NOSLEEP_WATCHDOG_OBSERVATION", "-module-cache-path", str(output / "module-cache"),
                                        str(case / "Model.swift"), str(case / "Tests.swift"), "-o", str(case / "fixture")],
                                       capture_output=True, text=True, timeout=90)
             (output / (name + ".compile.log")).write_text(compiled.stdout + compiled.stderr)
@@ -65,10 +71,10 @@ def main():
                         receipts.append({"case": phase, "exitCode": result.returncode})
                 finally:
                     subprocess.run([str(case / "fixture"), "cleanup", suite], check=True, capture_output=True, timeout=10)
-    paths = ["Sources/NoSleep.swift", "Sources/TimedProtection.swift", "Sources/TimedProtectionTests.swift", "tests/timed_protection_acceptance.py"]
+    paths = ["Sources/NoSleep.swift", "Sources/TimedProtection.swift", "Sources/TimedProtectionTests.swift", "Sources/LidProtectionTests.swift", "tests/timed_protection_acceptance.py"]
     (output / "receipt.json").write_text(json.dumps({"result": "passed", "realPowerActions": 0,
         "inputs": {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in paths}, "cases": receipts}, indent=2))
-    print("PASS: exact native timed engine, separate-process history and background deadline; seven critical mutants fail by assertion")
+    print("PASS: timed engine, separate-process history, lid ownership, watchdog recovery and ten assertion-based mutants")
 
 
 if __name__ == "__main__":

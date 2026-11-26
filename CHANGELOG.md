@@ -1,5 +1,12 @@
 # NoSleep changes
 
+## [4.2.0]
+
+- Add a separate closed-lid sleep switch to the window and both menus. Display and idle protection continue to work when it is off.
+- Include the lid switch in combined actions, keep it independent of the two timers, persist its setting and migrate the prior saved sleep selection. Clear only overrides created by NoSleep.
+- Preserve the local 4.1.1 watchdog fix. A successful recovery from a system sleep reset leaves the protection status stable, while actual recovery failures remain visible. The raw reset stays in diagnostics.
+- Minor release for the new independent control. Build 23 exceeds published 4.1.0/build 21 and locally installed build 22. Real power, first administrative setup, shutdown/restart, physical lid closure and downloaded-app Gatekeeper still require manual acceptance.
+
 ## [4.1.0]
 
 - Add independent sleep/display duration popovers with presets, custom hours/minutes, remaining time and explicit baseline-return text.
